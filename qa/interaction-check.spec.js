@@ -154,6 +154,32 @@ test("sources screen applies source import presets", async ({ page }) => {
   await expect(page.locator("[data-import-preset-note]")).toContainText("Bayt");
 });
 
+test("users can add a job board, scan multiple jobs, and monitor them together", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("http://127.0.0.1:3030/settings/sources");
+
+  const sourceLabel = `Remote Board ${Date.now()}`;
+  await page.locator('[data-source-form-field="label"]').fill(sourceLabel);
+  await page.locator('[data-source-form-field="url"]').fill("https://example.com/jobs");
+  await page.locator('[data-source-form-field="region"]').fill("Remote");
+  await page.locator("[data-add-source]").click();
+
+  const sourceCard = page.locator(".source-card").filter({ hasText: sourceLabel });
+  await expect(sourceCard).toBeVisible();
+  await sourceCard.locator("[data-scan-source]").click();
+  await expect(sourceCard).toContainText("وظائف مرتبطة");
+  await expect(page.locator("[data-action-message]")).toContainText("تم");
+
+  await page.goto("http://127.0.0.1:3030/app");
+  await expect.poll(async () => page.locator(".job-card").count()).toBeGreaterThanOrEqual(8);
+  await page.locator("[data-select-job]").nth(0).check();
+  await page.locator("[data-select-job]").nth(1).check();
+  await expect(page.locator(".bulk-toolbar")).toContainText("2");
+  await page.locator('[data-bulk-status="in_progress"]').click();
+  await expect(page.locator("[data-action-message]")).toContainText("تم");
+  await expect(page.locator("[data-select-job]:checked")).toHaveCount(0);
+});
+
 test("sources screen imports a pasted job post with extracted fields", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("http://127.0.0.1:3030/settings/sources");

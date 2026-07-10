@@ -1063,6 +1063,102 @@ button {
   border-radius: var(--radius);
 }
 
+.selection-hint {
+  margin: 12px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.bulk-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 14px 0 4px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-soft);
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.bulk-toolbar strong {
+  color: var(--ink);
+}
+
+.job-card {
+  position: relative;
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr);
+  align-items: start;
+  gap: 12px;
+  width: 100%;
+  text-align: right;
+  cursor: pointer;
+}
+
+.job-select {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 36px;
+  cursor: pointer;
+}
+
+.job-select input {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.job-select span {
+  width: 18px;
+  height: 18px;
+  border: 1px solid var(--border-strong);
+  border-radius: 5px;
+  background: white;
+}
+
+.job-select input:checked + span {
+  border-color: var(--teal);
+  background: var(--teal);
+  box-shadow: inset 0 0 0 4px white;
+}
+
+.source-manager {
+  margin-bottom: 14px;
+}
+
+.source-card {
+  display: grid;
+  gap: 10px;
+}
+
+.source-url {
+  overflow: hidden;
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: ltr;
+  text-align: left;
+}
+
+.source-card .primary-btn {
+  justify-self: start;
+}
+
+.scan-result {
+  margin-bottom: 14px;
+}
+
 @media (min-width: 760px) {
   .main {
     padding: 24px 22px 34px;

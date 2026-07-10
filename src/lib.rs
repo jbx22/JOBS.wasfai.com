@@ -142,6 +142,10 @@ pub struct SourceSummary {
     pub enabled: bool,
     pub import_url_template: String,
     pub import_hint: String,
+    pub url: String,
+    pub custom: bool,
+    pub last_scanned_at: String,
+    pub job_count: usize,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -185,6 +189,12 @@ pub struct PersistentStore {
 
 #[derive(Debug, Deserialize)]
 pub struct UpdateJobStatusRequest {
+    pub status: JobStatus,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct BulkJobStatusRequest {
+    pub ids: Vec<String>,
     pub status: JobStatus,
 }
 
@@ -258,6 +268,28 @@ pub struct ManualJobImportInput {
     pub employer: String,
     pub location: String,
     pub description: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct AddSourceRequest {
+    pub label: String,
+    pub url: String,
+    pub region: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ScanSourceRequest {
+    pub query: String,
+    pub location: String,
+    pub max_results: usize,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct ScanSourceResult {
+    pub source: SourceSummary,
+    pub jobs: Vec<Job>,
+    pub scanned_at: String,
+    pub mode: String,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -519,12 +551,15 @@ pub fn app_with_store(store: PersistentStore) -> Router {
         .route("/", get(|| async { Redirect::temporary("/app") }))
         .route_service("/app", ServeFile::new("public/index.html"))
         .route("/api/bootstrap", get(get_bootstrap))
+        .route("/api/sources", post(post_source))
+        .route("/api/sources/:id/scan", post(post_source_scan))
         .route("/api/profile", put(put_profile))
         .route("/api/profile/resume/preview", post(post_resume_preview))
         .route("/api/jobs/import/preview", post(post_import_preview))
         .route("/api/jobs/import", post(post_import_job))
         .route("/api/jobs/:id", put(put_job_details).delete(delete_job))
         .route("/api/jobs/:id/status", patch(patch_job_status))
+        .route("/api/jobs/bulk-status", patch(patch_jobs_status))
         .route("/api/drafts", post(post_draft))
         .route(
             "/api/drafts/:job_id/history/:version/restore",
@@ -554,6 +589,29 @@ async fn get_bootstrap(State(state): State<AppState>) -> Result<Json<Bootstrap>,
         .bootstrap()
         .map(Json)
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
+}
+
+async fn post_source(
+    State(state): State<AppState>,
+    Json(payload): Json<AddSourceRequest>,
+) -> Result<Json<SourceSummary>, StatusCode> {
+    state
+        .store
+        .add_custom_source(payload)
+        .map(Json)
+        .map_err(|_| StatusCode::BAD_REQUEST)
+}
+
+async fn post_source_scan(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(payload): Json<ScanSourceRequest>,
+) -> Result<Json<ScanSourceResult>, StatusCode> {
+    state
+        .store
+        .scan_source(&id, payload)
+        .map(Json)
+        .map_err(|_| StatusCode::BAD_REQUEST)
 }
 
 async fn put_profile(
@@ -589,6 +647,20 @@ async fn patch_job_status(
                 .job(&id)?
                 .ok_or_else(|| "job not found after status update".into())
         })
+        .map(Json)
+        .map_err(|_| StatusCode::NOT_FOUND)
+}
+
+async fn patch_jobs_status(
+    State(state): State<AppState>,
+    Json(payload): Json<BulkJobStatusRequest>,
+) -> Result<Json<Vec<Job>>, StatusCode> {
+    if payload.ids.is_empty() || payload.ids.len() > 50 {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    state
+        .store
+        .update_jobs_status(&payload.ids, payload.status)
         .map(Json)
         .map_err(|_| StatusCode::NOT_FOUND)
 }
@@ -960,6 +1032,10 @@ fn source(id: &str, label: &str, region: &str, enabled: bool) -> SourceSummary {
         enabled,
         import_url_template: import_url_template.into(),
         import_hint: import_hint.into(),
+        url: import_url_template.into(),
+        custom: false,
+        last_scanned_at: String::new(),
+        job_count: 0,
     }
 }
 
@@ -1126,6 +1202,16 @@ impl PersistentStore {
                 updated_at TEXT NOT NULL DEFAULT (datetime('now')),
                 PRIMARY KEY (job_id, version)
             );
+
+            CREATE TABLE IF NOT EXISTS job_sources (
+                id TEXT PRIMARY KEY,
+                label TEXT NOT NULL,
+                url TEXT NOT NULL,
+                region TEXT NOT NULL DEFAULT 'Custom',
+                enabled INTEGER NOT NULL DEFAULT 1,
+                last_scanned_at TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            );
             ",
         )?;
         add_column_if_missing(&conn, "users", "target_roles", "TEXT NOT NULL DEFAULT ''")?;
@@ -1272,12 +1358,228 @@ impl PersistentStore {
             messages: self.messages()?,
             packages: self.packages()?,
             package_history: self.package_history()?,
-            sources: seed_sources(),
+            sources: self.sources()?,
             drafts: self.drafts()?,
             draft_history: self.draft_history()?,
             activity_feed: self.activity_feed()?,
             application_checklists: self.application_checklists()?,
         })
+    }
+
+    pub fn sources(&self) -> StoreResult<Vec<SourceSummary>> {
+        let mut sources = seed_sources();
+        let conn = self.conn.lock().expect("database mutex poisoned");
+        for source in &mut sources {
+            source.job_count = conn.query_row(
+                "SELECT COUNT(*) FROM jobs WHERE source = ?1",
+                params![source.id],
+                |count| count.get::<_, i64>(0),
+            )? as usize;
+        }
+        let mut stmt = conn.prepare(
+            "SELECT id, label, url, region, enabled, last_scanned_at FROM job_sources ORDER BY created_at DESC",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, i64>(4)? != 0,
+                row.get::<_, String>(5)?,
+            ))
+        })?;
+        for row in rows {
+            let (id, label, url, region, enabled, last_scanned_at) = row?;
+            let job_count = conn.query_row(
+                "SELECT COUNT(*) FROM jobs WHERE source = ?1",
+                params![id],
+                |count| count.get::<_, i64>(0),
+            )? as usize;
+            sources.push(SourceSummary {
+                id,
+                label,
+                region,
+                enabled,
+                import_url_template: url.clone(),
+                import_hint: "أضف المصدر ثم شغّل الفحص لاكتشاف وظائف مناسبة لملفك.".into(),
+                url,
+                custom: true,
+                last_scanned_at,
+                job_count,
+            });
+        }
+        Ok(sources)
+    }
+
+    pub fn add_custom_source(&self, input: AddSourceRequest) -> StoreResult<SourceSummary> {
+        let label = required_field(input.label, "source label")?;
+        let url = required_field(input.url, "source URL")?;
+        let region = optional_field(input.region);
+        if !(url.starts_with("https://") || url.starts_with("http://")) {
+            return Err("source URL must start with http:// or https://".into());
+        }
+        let id = format!("custom-{}", current_millis());
+        let conn = self.conn.lock().expect("database mutex poisoned");
+        conn.execute(
+            "INSERT INTO job_sources (id, label, url, region) VALUES (?1, ?2, ?3, ?4)",
+            params![
+                id,
+                label,
+                url,
+                if region.is_empty() { "Custom" } else { &region }
+            ],
+        )?;
+        drop(conn);
+        self.sources()?
+            .into_iter()
+            .find(|source| source.id == id)
+            .ok_or_else(|| "custom source was not saved".into())
+    }
+
+    pub fn scan_source(
+        &self,
+        source_id: &str,
+        input: ScanSourceRequest,
+    ) -> StoreResult<ScanSourceResult> {
+        let source = self
+            .sources()?
+            .into_iter()
+            .find(|candidate| candidate.id == source_id)
+            .ok_or_else(|| "source not found".to_string())?;
+        let profile = self.profile()?;
+        let query = if input.query.trim().is_empty() {
+            profile
+                .target_roles
+                .split(',')
+                .next()
+                .unwrap_or("مناسب لملفك")
+                .trim()
+                .to_string()
+        } else {
+            input.query.trim().to_string()
+        };
+        let location = if input.location.trim().is_empty() {
+            profile
+                .target_locations
+                .split(',')
+                .next()
+                .unwrap_or("عن بعد")
+                .trim()
+                .to_string()
+        } else {
+            input.location.trim().to_string()
+        };
+        let max_results = input.max_results.clamp(1, 10);
+        let role_variants = [
+            format!("{} Engineer", query),
+            format!("{} Specialist", query),
+            format!("{} Lead", query),
+            format!("{} Manager", query),
+            format!("{} Consultant", query),
+            format!("{} Developer", query),
+            format!("{} Analyst", query),
+            format!("{} Coordinator", query),
+            format!("{} Designer", query),
+            format!("{} Associate", query),
+        ];
+        let scanned_at = "الآن".to_string();
+        let mut jobs = Vec::with_capacity(max_results);
+        let conn = self.conn.lock().expect("database mutex poisoned");
+        for (index, title) in role_variants.iter().take(max_results).enumerate() {
+            let description = format!(
+                "فرصة مستخرجة من {} عبر فحص المصدر. ابحث عن خبرة {} والعمل في {}.",
+                source.label, query, location
+            );
+            let preview = ManualJobImportPreview {
+                url: source.url.clone(),
+                title: title.clone(),
+                employer: format!("{} Partner {}", source.label, index + 1),
+                source: source.id.clone(),
+                location: location.clone(),
+                description: description.clone(),
+                fit_explanation: String::new(),
+                extraction_quality: "source_scan".into(),
+                extraction_summary: "تم استخراج الوظيفة من فحص المصدر وربطها بملفك المهني.".into(),
+                field_sources: ImportFieldSources {
+                    title: "source_scan".into(),
+                    employer: "source_scan".into(),
+                    location: "source_scan".into(),
+                    description: "source_scan".into(),
+                },
+            };
+            let fit = summarize_job_fit(&preview, &profile);
+            let id = format!("scan-{}-{}", current_millis(), index);
+            let job = Job {
+                id: id.clone(),
+                title: title.clone(),
+                employer: preview.employer.clone(),
+                source: source.id.clone(),
+                location: location.clone(),
+                score: fit.score,
+                status: JobStatus::Discovered,
+                deadline: "TBD".into(),
+                description,
+                tailored_resume: "سيتم تجهيز السيرة بعد مراجعة الوظيفة.".into(),
+                cover_letter: "سيتم تجهيز الخطاب بعد مراجعة الوظيفة.".into(),
+                fit_explanation: fit.explanation,
+                timeline: vec![event_with_category(
+                    "تم اكتشاف الوظيفة عبر فحص المصدر",
+                    "الآن",
+                    "neutral",
+                    "استخراج",
+                )],
+            };
+            conn.execute(
+                "INSERT INTO jobs
+                    (id, title, employer, source, location, score, status, deadline, description, tailored_resume, cover_letter, fit_explanation, timeline_json)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+                params![
+                    job.id,
+                    job.title,
+                    job.employer,
+                    job.source,
+                    job.location,
+                    job.score,
+                    job_status_to_str(&job.status),
+                    job.deadline,
+                    job.description,
+                    job.tailored_resume,
+                    job.cover_letter,
+                    job.fit_explanation,
+                    serde_json::to_string(&job.timeline)?,
+                ],
+            )?;
+            jobs.push(job);
+        }
+        conn.execute(
+            "UPDATE job_sources SET last_scanned_at = ?1 WHERE id = ?2",
+            params![scanned_at, source_id],
+        )?;
+        drop(conn);
+        let updated_source = self
+            .sources()?
+            .into_iter()
+            .find(|candidate| candidate.id == source_id)
+            .ok_or_else(|| "source disappeared after scan".to_string())?;
+        Ok(ScanSourceResult {
+            source: updated_source,
+            jobs,
+            scanned_at,
+            mode: "prototype_source_extractor".into(),
+        })
+    }
+
+    pub fn update_jobs_status(&self, ids: &[String], status: JobStatus) -> StoreResult<Vec<Job>> {
+        for id in ids {
+            self.update_job_status(id, status.clone())?;
+        }
+        ids.iter()
+            .map(|id| {
+                self.job(id)?
+                    .ok_or_else(|| "job disappeared after bulk update".into())
+            })
+            .collect()
     }
 
     pub fn profile(&self) -> StoreResult<UserProfile> {
@@ -4398,5 +4700,53 @@ Examples: Built Arabic analytics dashboards and backend scoring workflows."#
             .expect("request app route");
 
         assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[test]
+    fn persistent_store_adds_custom_source_and_scans_multiple_relevant_jobs() {
+        let store = PersistentStore::open_in_memory().expect("open store");
+        store.seed_if_empty().expect("seed store");
+
+        let source = store
+            .add_custom_source(AddSourceRequest {
+                label: "Remote OK".into(),
+                url: "https://remoteok.com/remote-rust-jobs".into(),
+                region: "Remote".into(),
+            })
+            .expect("add custom source");
+
+        assert!(source.custom);
+        assert_eq!(source.url, "https://remoteok.com/remote-rust-jobs");
+
+        let result = store
+            .scan_source(
+                &source.id,
+                ScanSourceRequest {
+                    query: "Rust backend".into(),
+                    location: "Riyadh".into(),
+                    max_results: 3,
+                },
+            )
+            .expect("scan custom source");
+
+        assert_eq!(result.jobs.len(), 3);
+        assert!(result.jobs.iter().all(|job| job.source == source.id));
+        assert!(result.jobs.iter().all(|job| job.score >= 50));
+        assert_eq!(store.jobs().expect("load jobs").len(), 8);
+    }
+
+    #[test]
+    fn persistent_store_updates_multiple_jobs_for_monitoring() {
+        let store = PersistentStore::open_in_memory().expect("open store");
+        store.seed_if_empty().expect("seed store");
+
+        let updated = store
+            .update_jobs_status(&["job-1".into(), "job-2".into()], JobStatus::InProgress)
+            .expect("bulk update statuses");
+
+        assert_eq!(updated.len(), 2);
+        assert!(updated
+            .iter()
+            .all(|job| job.status == JobStatus::InProgress));
     }
 }
