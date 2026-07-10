@@ -1,0 +1,6 @@
+/target/
+/node_modules/
+/data/*.sqlite
+/test-results/
+/qa/*-profile/
+/qa/*.png
