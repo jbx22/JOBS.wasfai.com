@@ -25,4 +25,11 @@ Milestone 1 intentionally does not mutate those repos and does not implement rea
 - Select multiple job cards from the search screen and move them together to processing, ready, applied, or follow-up.
 - Every scanned job remains a normal tracked job with a fit score, source label, status, timeline, tailored documents, and analytics support.
 
-The current source scanner is a deterministic prototype extractor. It models the source connector and relevance workflow without claiming live scraping from third-party boards; production connectors will need per-site parsers, rate limits, terms-of-service review, and scheduled jobs.
+Live connector behavior:
+
+- WUZZUF, Bayt, Khamsat, and generic public boards use a real HTTP client and parse public JSON-LD `JobPosting` data or constrained job-card HTML.
+- LinkedIn and Indeed are represented as approved-API connectors and are intentionally not scraped around access controls. They require provider-approved credentials before live scanning.
+- Enable **فحص تلقائي** per source to persist an interval. The Rust background worker checks due sources every minute, records failures, and retries at the configured interval.
+- Each connector filters by the saved role/location profile, normalizes results into the common `Job` model, and deduplicates matching source/title/employer records.
+
+Production connectors still need per-site terms-of-service review, robots/rate-limit handling, credential storage, and deployment secrets.

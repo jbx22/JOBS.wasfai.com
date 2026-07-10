@@ -131,6 +131,14 @@ function sourceLabel(sourceId) {
   return state.sources.find((source) => source.id === sourceId)?.label || sourceId;
 }
 
+function connectorModeLabel(mode) {
+  return {
+    public_html: "موصل HTML مباشر",
+    approved_api: "يتطلب API معتمد",
+    unsupported: "موصل غير متاح",
+  }[mode] || "موصل مخصص";
+}
+
 function packageFor(jobId) {
   return state.packages.find((item) => item.job_id === jobId);
 }
@@ -771,6 +779,67 @@ function setupEvents() {
     });
   });
 
+  document.querySelectorAll("[data-live-scan-source]").forEach((item) => {
+    item.addEventListener("click", async () => {
+      const sourceId = item.dataset.liveScanSource;
+      const result = await runAction(
+        `live-scan-${sourceId}`,
+        "جاري الاتصال بالمصدر واستخراج الوظائف العامة...",
+        "تم جلب الوظائف الجديدة",
+        () =>
+          apiJson(`/api/sources/${sourceId}/live-scan`, {
+            method: "POST",
+            body: JSON.stringify({
+              query: state.profile.target_roles,
+              location: state.profile.target_locations,
+              max_results: 10,
+            }),
+          }),
+      );
+      if (result) {
+        result.jobs.forEach(replaceJob);
+        state.sources = state.sources.map((candidate) =>
+          candidate.id === result.source.id ? result.source : candidate,
+        );
+        state.scanResult = result;
+      }
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-source-schedule]").forEach((item) => {
+    item.addEventListener("change", async () => {
+      const sourceId = item.dataset.sourceSchedule;
+      const interval = document.querySelector(`[data-source-interval="${sourceId}"]`);
+      const source = await runAction(
+        `schedule-${sourceId}`,
+        "جاري تحديث جدولة المصدر...",
+        "تم تحديث الجدولة",
+        () =>
+          apiJson(`/api/sources/${sourceId}/schedule`, {
+            method: "PUT",
+            body: JSON.stringify({
+              enabled: item.checked,
+              interval_minutes: Number(interval?.value || 360),
+            }),
+          }),
+      );
+      if (source) {
+        state.sources = state.sources.map((candidate) =>
+          candidate.id === source.id ? source : candidate,
+        );
+      }
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-source-interval]").forEach((item) => {
+    item.addEventListener("change", () => {
+      const toggle = document.querySelector(`[data-source-schedule="${item.dataset.sourceInterval}"]`);
+      if (toggle) toggle.dispatchEvent(new Event("change"));
+    });
+  });
+
   document.querySelectorAll("[data-profile-field]").forEach((item) => {
     item.addEventListener("input", (event) => {
       state.profile[event.target.dataset.profileField] = event.target.value;
@@ -1359,7 +1428,7 @@ function renderSources() {
     confirm:
       "\u0625\u0646\u0634\u0627\u0621 \u0645\u0633\u0627\u062d\u0629 \u0648\u0638\u064a\u0641\u0629",
   };
-  const cards = state.sources.map((source) => `<article class="package-card source-card"><div class="package-heading"><div><strong>${source.label}</strong><p class="screen-note">${source.region} · ${source.job_count || 0} وظائف مرتبطة</p></div><span class="small-chip ${source.enabled ? "teal" : ""}">${source.enabled ? copy.enabled : copy.needsSetup}</span></div><p class="source-url">${escapeHtml(source.url || source.import_url_template || "")}</p>${source.custom ? `<button class="primary-btn" data-scan-source="${source.id}">${icon("search")} فحص المصدر</button><small class="screen-note">${source.last_scanned_at ? `آخر فحص: ${source.last_scanned_at}` : "لم يتم الفحص بعد"}</small>` : ""}</article>`).join("");
+  const cards = state.sources.map((source) => `<article class="package-card source-card"><div class="package-heading"><div><strong>${source.label}</strong><p class="screen-note">${source.region} · ${source.job_count || 0} وظائف مرتبطة</p></div><span class="small-chip ${source.enabled ? "teal" : ""}">${source.enabled ? copy.enabled : copy.needsSetup}</span></div><p class="source-url">${escapeHtml(source.url || source.import_url_template || "")}</p><div class="source-connector"><span class="small-chip">${connectorModeLabel(source.connector_mode)}</span><small class="screen-note">${escapeHtml(source.connector_note || source.connector || "")}</small></div>${source.connector_mode === "public_html" ? `<div class="button-row"><button class="primary-btn" data-live-scan-source="${source.id}">${icon("search")} فحص مباشر</button>${source.custom ? `<button class="secondary-btn" data-scan-source="${source.id}">فحص تجريبي</button>` : ""}</div>` : `<small class="screen-note">يحتاج ربط بيانات اعتماد المزود قبل الفحص المباشر.</small>`}<label class="schedule-toggle"><input type="checkbox" data-source-schedule="${source.id}" ${source.scheduled ? "checked" : ""} /><span>فحص تلقائي</span><select data-source-interval="${source.id}"><option value="60" ${source.interval_minutes === 60 ? "selected" : ""}>كل ساعة</option><option value="360" ${source.interval_minutes === 360 || !source.interval_minutes ? "selected" : ""}>كل 6 ساعات</option><option value="1440" ${source.interval_minutes === 1440 ? "selected" : ""}>يومياً</option></select></label><small class="screen-note">${source.last_error ? `آخر خطأ: ${escapeHtml(source.last_error)}` : source.scheduled && source.next_scan_at ? `الفحص القادم: ${escapeHtml(source.next_scan_at)}` : source.last_scanned_at ? `آخر فحص: ${source.last_scanned_at}` : "لم يتم الفحص بعد"}</small></article>`).join("");
   const form = state.importForm;
   const sourceForm = state.sourceForm;
   const activePreset =

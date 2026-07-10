@@ -18,6 +18,9 @@ use tower_http::services::{ServeDir, ServeFile};
 use typst::foundations::{Dict, IntoValue};
 use typst_as_lib::TypstEngine;
 
+mod connectors;
+use connectors::{connector_profile, fetch_and_parse, ConnectorMode};
+
 type StoreResult<T> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -146,6 +149,13 @@ pub struct SourceSummary {
     pub custom: bool,
     pub last_scanned_at: String,
     pub job_count: usize,
+    pub connector: String,
+    pub connector_mode: String,
+    pub connector_note: String,
+    pub last_error: String,
+    pub scheduled: bool,
+    pub interval_minutes: u32,
+    pub next_scan_at: String,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -282,6 +292,12 @@ pub struct ScanSourceRequest {
     pub query: String,
     pub location: String,
     pub max_results: usize,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ScheduleSourceRequest {
+    pub enabled: bool,
+    pub interval_minutes: u32,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -543,6 +559,16 @@ pub fn app() -> Router {
     let store = PersistentStore::open_path(data_dir.join("prototype.sqlite"))
         .expect("open prototype database");
     store.seed_if_empty().expect("seed prototype database");
+    if tokio::runtime::Handle::try_current().is_ok() {
+        let scheduler_store = store.clone();
+        tokio::spawn(async move {
+            let mut ticker = tokio::time::interval(std::time::Duration::from_secs(60));
+            loop {
+                ticker.tick().await;
+                let _ = scheduler_store.run_scheduled_scans().await;
+            }
+        });
+    }
     app_with_store(store)
 }
 
@@ -553,6 +579,8 @@ pub fn app_with_store(store: PersistentStore) -> Router {
         .route("/api/bootstrap", get(get_bootstrap))
         .route("/api/sources", post(post_source))
         .route("/api/sources/:id/scan", post(post_source_scan))
+        .route("/api/sources/:id/live-scan", post(post_source_live_scan))
+        .route("/api/sources/:id/schedule", put(put_source_schedule))
         .route("/api/profile", put(put_profile))
         .route("/api/profile/resume/preview", post(post_resume_preview))
         .route("/api/jobs/import/preview", post(post_import_preview))
@@ -610,6 +638,31 @@ async fn post_source_scan(
     state
         .store
         .scan_source(&id, payload)
+        .map(Json)
+        .map_err(|_| StatusCode::BAD_REQUEST)
+}
+
+async fn post_source_live_scan(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(payload): Json<ScanSourceRequest>,
+) -> Result<Json<ScanSourceResult>, StatusCode> {
+    state
+        .store
+        .scan_source_live(&id, payload)
+        .await
+        .map(Json)
+        .map_err(|_| StatusCode::BAD_GATEWAY)
+}
+
+async fn put_source_schedule(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(payload): Json<ScheduleSourceRequest>,
+) -> Result<Json<SourceSummary>, StatusCode> {
+    state
+        .store
+        .schedule_source(&id, payload)
         .map(Json)
         .map_err(|_| StatusCode::BAD_REQUEST)
 }
@@ -1025,6 +1078,7 @@ fn append_job_timeline_event(
 
 fn source(id: &str, label: &str, region: &str, enabled: bool) -> SourceSummary {
     let (import_url_template, import_hint) = source_import_preset(id);
+    let connector = connector_profile(id);
     SourceSummary {
         id: id.into(),
         label: label.into(),
@@ -1036,6 +1090,29 @@ fn source(id: &str, label: &str, region: &str, enabled: bool) -> SourceSummary {
         custom: false,
         last_scanned_at: String::new(),
         job_count: 0,
+        connector: connector.label.into(),
+        connector_mode: connector_mode_key(connector.mode).into(),
+        connector_note: connector_note(id).into(),
+        last_error: String::new(),
+        scheduled: false,
+        interval_minutes: 360,
+        next_scan_at: String::new(),
+    }
+}
+
+fn connector_mode_key(mode: ConnectorMode) -> &'static str {
+    match mode {
+        ConnectorMode::PublicHtml => "public_html",
+        ConnectorMode::ApprovedApi => "approved_api",
+        ConnectorMode::Unsupported => "unsupported",
+    }
+}
+
+fn connector_note(source_id: &str) -> &'static str {
+    match connector_profile(source_id).mode {
+        ConnectorMode::ApprovedApi => "يتطلب مفتاح API معتمد من المزود.",
+        ConnectorMode::PublicHtml => "يستخدم صفحات عامة مع احترام حدود الموقع.",
+        ConnectorMode::Unsupported => "يحتاج موصل مخصص.",
     }
 }
 
@@ -1212,6 +1289,15 @@ impl PersistentStore {
                 last_scanned_at TEXT NOT NULL DEFAULT '',
                 created_at TEXT NOT NULL DEFAULT (datetime('now'))
             );
+
+            CREATE TABLE IF NOT EXISTS source_syncs (
+                source_id TEXT PRIMARY KEY,
+                enabled INTEGER NOT NULL DEFAULT 0,
+                interval_minutes INTEGER NOT NULL DEFAULT 360,
+                last_run_at TEXT NOT NULL DEFAULT '',
+                next_run_at TEXT NOT NULL DEFAULT '',
+                last_error TEXT NOT NULL DEFAULT ''
+            );
             ",
         )?;
         add_column_if_missing(&conn, "users", "target_roles", "TEXT NOT NULL DEFAULT ''")?;
@@ -1375,6 +1461,26 @@ impl PersistentStore {
                 params![source.id],
                 |count| count.get::<_, i64>(0),
             )? as usize;
+            if let Some((enabled, interval_minutes, next_run_at, last_error)) = conn
+                .query_row(
+                    "SELECT enabled, interval_minutes, next_run_at, last_error FROM source_syncs WHERE source_id = ?1",
+                    params![source.id],
+                    |row| {
+                        Ok((
+                            row.get::<_, i64>(0)? != 0,
+                            row.get::<_, u32>(1)?,
+                            row.get::<_, String>(2)?,
+                            row.get::<_, String>(3)?,
+                        ))
+                    },
+                )
+                .optional()?
+            {
+                source.scheduled = enabled;
+                source.interval_minutes = interval_minutes;
+                source.next_scan_at = next_run_at;
+                source.last_error = last_error;
+            }
         }
         let mut stmt = conn.prepare(
             "SELECT id, label, url, region, enabled, last_scanned_at FROM job_sources ORDER BY created_at DESC",
@@ -1391,6 +1497,22 @@ impl PersistentStore {
         })?;
         for row in rows {
             let (id, label, url, region, enabled, last_scanned_at) = row?;
+            let connector = connector_profile(&id);
+            let connector_note = connector_note(&id).to_string();
+            let sync_meta = conn
+                .query_row(
+                    "SELECT enabled, interval_minutes, next_run_at, last_error FROM source_syncs WHERE source_id = ?1",
+                    params![id],
+                    |sync| {
+                        Ok((
+                            sync.get::<_, i64>(0)? != 0,
+                            sync.get::<_, u32>(1)?,
+                            sync.get::<_, String>(2)?,
+                            sync.get::<_, String>(3)?,
+                        ))
+                    },
+                )
+                .optional()?;
             let job_count = conn.query_row(
                 "SELECT COUNT(*) FROM jobs WHERE source = ?1",
                 params![id],
@@ -1407,6 +1529,16 @@ impl PersistentStore {
                 custom: true,
                 last_scanned_at,
                 job_count,
+                connector: connector.label.into(),
+                connector_mode: connector_mode_key(connector.mode).into(),
+                connector_note,
+                scheduled: sync_meta.as_ref().map(|meta| meta.0).unwrap_or(false),
+                interval_minutes: sync_meta.as_ref().map(|meta| meta.1).unwrap_or(360),
+                next_scan_at: sync_meta
+                    .as_ref()
+                    .map(|meta| meta.2.clone())
+                    .unwrap_or_default(),
+                last_error: sync_meta.map(|meta| meta.3).unwrap_or_default(),
             });
         }
         Ok(sources)
@@ -1435,6 +1567,78 @@ impl PersistentStore {
             .into_iter()
             .find(|source| source.id == id)
             .ok_or_else(|| "custom source was not saved".into())
+    }
+
+    pub fn schedule_source(
+        &self,
+        source_id: &str,
+        input: ScheduleSourceRequest,
+    ) -> StoreResult<SourceSummary> {
+        if !self.sources()?.iter().any(|source| source.id == source_id) {
+            return Err("source not found".into());
+        }
+        let interval_minutes = input.interval_minutes.clamp(15, 7 * 24 * 60);
+        let conn = self.conn.lock().expect("database mutex poisoned");
+        if input.enabled {
+            conn.execute(
+                "INSERT INTO source_syncs (source_id, enabled, interval_minutes, next_run_at, last_error) VALUES (?1, 1, ?2, datetime('now', '+' || ?2 || ' minutes'), '') ON CONFLICT(source_id) DO UPDATE SET enabled = 1, interval_minutes = excluded.interval_minutes, next_run_at = excluded.next_run_at, last_error = ''",
+                params![source_id, interval_minutes],
+            )?;
+        } else {
+            conn.execute(
+                "INSERT INTO source_syncs (source_id, enabled, interval_minutes, next_run_at, last_error) VALUES (?1, 0, ?2, '', '') ON CONFLICT(source_id) DO UPDATE SET enabled = 0, interval_minutes = excluded.interval_minutes, next_run_at = '', last_error = ''",
+                params![source_id, interval_minutes],
+            )?;
+        }
+        drop(conn);
+        self.sources()?
+            .into_iter()
+            .find(|source| source.id == source_id)
+            .ok_or_else(|| "source disappeared after schedule update".into())
+    }
+
+    pub async fn run_scheduled_scans(&self) -> StoreResult<usize> {
+        let due_sources = {
+            let conn = self.conn.lock().expect("database mutex poisoned");
+            let mut stmt = conn.prepare(
+                "SELECT source_id, interval_minutes FROM source_syncs WHERE enabled = 1 AND (next_run_at = '' OR next_run_at <= datetime('now'))",
+            )?;
+            let rows = stmt.query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, u32>(1)?))
+            })?;
+            collect_rows(rows)?
+        };
+        let profile = self.profile()?;
+        let mut completed = 0;
+        for (source_id, interval_minutes) in due_sources {
+            let result = self
+                .scan_source_live(
+                    &source_id,
+                    ScanSourceRequest {
+                        query: profile.target_roles.clone(),
+                        location: profile.target_locations.clone(),
+                        max_results: 10,
+                    },
+                )
+                .await;
+            let conn = self.conn.lock().expect("database mutex poisoned");
+            match result {
+                Ok(_) => {
+                    conn.execute(
+                        "UPDATE source_syncs SET last_run_at = datetime('now'), next_run_at = datetime('now', '+' || ?1 || ' minutes'), last_error = '' WHERE source_id = ?2",
+                        params![interval_minutes, source_id],
+                    )?;
+                    completed += 1;
+                }
+                Err(error) => {
+                    conn.execute(
+                        "UPDATE source_syncs SET last_run_at = datetime('now'), next_run_at = datetime('now', '+' || ?1 || ' minutes'), last_error = ?2 WHERE source_id = ?3",
+                        params![interval_minutes, error.to_string(), source_id],
+                    )?;
+                }
+            }
+        }
+        Ok(completed)
     }
 
     pub fn scan_source(
@@ -1580,6 +1784,68 @@ impl PersistentStore {
                     .ok_or_else(|| "job disappeared after bulk update".into())
             })
             .collect()
+    }
+
+    pub async fn scan_source_live(
+        &self,
+        source_id: &str,
+        input: ScanSourceRequest,
+    ) -> StoreResult<ScanSourceResult> {
+        let source = self
+            .sources()?
+            .into_iter()
+            .find(|candidate| candidate.id == source_id)
+            .ok_or_else(|| "source not found".to_string())?;
+        let query = input.query.trim().to_string();
+        let location = input.location.trim().to_string();
+        let listings = fetch_and_parse(&source.url, source_id, &query, &location)
+            .await
+            .map_err(std::io::Error::other)?;
+        if listings.is_empty() {
+            return Err("live connector returned no matching listings".into());
+        }
+
+        let existing = self.jobs()?;
+        let mut jobs = Vec::new();
+        for listing in listings.into_iter().take(input.max_results.clamp(1, 10)) {
+            if existing.iter().any(|job| {
+                job.source == source_id
+                    && job.title.eq_ignore_ascii_case(&listing.title)
+                    && job.employer.eq_ignore_ascii_case(&listing.employer)
+            }) {
+                continue;
+            }
+            let imported = self.import_manual_job(ManualJobImportInput {
+                url: listing.source_url,
+                title: listing.title,
+                employer: listing.employer,
+                location: listing.location,
+                description: listing.description,
+            })?;
+            let conn = self.conn.lock().expect("database mutex poisoned");
+            conn.execute(
+                "UPDATE jobs SET source = ?1 WHERE id = ?2",
+                params![source_id, imported.id],
+            )?;
+            drop(conn);
+            if let Some(job) = self.job(&imported.id)? {
+                jobs.push(job);
+            }
+        }
+        if jobs.is_empty() {
+            return Err("live connector found no new matching listings".into());
+        }
+        let updated_source = self
+            .sources()?
+            .into_iter()
+            .find(|candidate| candidate.id == source_id)
+            .ok_or_else(|| "source disappeared after live scan".to_string())?;
+        Ok(ScanSourceResult {
+            source: updated_source,
+            jobs,
+            scanned_at: "الآن".into(),
+            mode: "live_html_connector".into(),
+        })
     }
 
     pub fn profile(&self) -> StoreResult<UserProfile> {
@@ -4748,5 +5014,26 @@ Examples: Built Arabic analytics dashboards and backend scoring workflows."#
         assert!(updated
             .iter()
             .all(|job| job.status == JobStatus::InProgress));
+    }
+
+    #[test]
+    fn persistent_store_schedules_source_scans_with_connector_metadata() {
+        let store = PersistentStore::open_in_memory().expect("open store");
+        store.seed_if_empty().expect("seed store");
+
+        let source = store
+            .schedule_source(
+                "wazzuf",
+                ScheduleSourceRequest {
+                    enabled: true,
+                    interval_minutes: 60,
+                },
+            )
+            .expect("schedule source");
+
+        assert!(source.scheduled);
+        assert_eq!(source.connector_mode, "public_html");
+        assert!(!source.next_scan_at.is_empty());
+        assert!(source.connector_note.contains("عامة"));
     }
 }

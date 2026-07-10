@@ -154,6 +154,24 @@ test("sources screen applies source import presets", async ({ page }) => {
   await expect(page.locator("[data-import-preset-note]")).toContainText("Bayt");
 });
 
+test("sources screen exposes live connector capabilities and scheduled scans", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("http://127.0.0.1:3030/settings/sources");
+
+  const wuzzuf = page.locator(".source-card").filter({ hasText: "WUZZUF" });
+  await expect(wuzzuf.locator('[data-live-scan-source="wazzuf"]')).toBeVisible();
+  const scheduleToggle = wuzzuf.locator('[data-source-schedule="wazzuf"]');
+  if (await scheduleToggle.isChecked()) {
+    await scheduleToggle.uncheck();
+  }
+  await scheduleToggle.check();
+  await expect(page.locator("[data-action-message]")).toContainText("تم");
+
+  const linkedin = page.locator(".source-card").filter({ hasText: "LinkedIn" });
+  await expect(linkedin).toContainText("API");
+  await expect(linkedin.locator('[data-live-scan-source="linkedin"]')).toHaveCount(0);
+});
+
 test("users can add a job board, scan multiple jobs, and monitor them together", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("http://127.0.0.1:3030/settings/sources");

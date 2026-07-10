@@ -1155,6 +1155,33 @@ button {
   justify-self: start;
 }
 
+.source-connector {
+  display: grid;
+  gap: 5px;
+}
+
+.schedule-toggle {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  color: var(--text);
+  font-size: 12px;
+}
+
+.schedule-toggle input {
+  accent-color: var(--teal);
+}
+
+.schedule-toggle select {
+  min-height: 32px;
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: white;
+  color: var(--text);
+}
+
 .scan-result {
   margin-bottom: 14px;
 }
