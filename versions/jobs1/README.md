@@ -10,30 +10,6 @@ cargo run
 
 Open `http://127.0.0.1:3030/app`.
 
-## Versioning
-
-Every code/UI/backend/config change MUST be followed by a version bump before the change is considered complete.
-
-```powershell
-node tools/bump-version.js "short description of changes"
-node tools/bump-version.js --patch "tiny fix"
-node tools/bump-version.js --major "big redesign"
-```
-
-What it does:
-
-1. Reads `VERSION.json` (creates `jobs1` if missing).
-2. Computes the next sequential `jobs{N}` (or jumps for `--major`).
-3. Copies the current source tree into `versions/jobs{N}/`.
-4. Writes `VERSION.json`, prepends to `CHANGELOG.md`, updates `VERSIONS.md`.
-5. Appends an entry to `memory/YYYY-MM-DD.md`.
-
-Modes: default = minor (`jobs1` → `jobs2`), `--major` (big redesign: `jobs1` → `jobs10`), `--patch` is reserved for tiny fixes that re-snapshot without bumping the integer (currently same as minor).
-
-Files snapshotted: `public/`, `src/`, `assets/`, `Cargo.toml`, `Cargo.lock`, `package.json`, `package-lock.json`, `README.md`, `tools/`, `qa/`.
-
-Convention: `jobs{N}` is a sequential integer. `jobs1` = initial prototype, `jobs2` = next, etc. This is for change tracking and rollback, not a marketing version.
-
 ## Source Repo Map
 
 - `job-ops`: primary product foundation for login, jobs/statuses, scoring, pipeline runs, Ghostwriter, generated PDFs, Gmail/IMAP follow-up, timelines, and analytics concepts.
