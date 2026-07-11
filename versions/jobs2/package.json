@@ -1,0 +1,18 @@
+{
+  "name": "mena-job-command-center",
+  "version": "1.0.0",
+  "description": "Design-prototype PWA for a MENA-focused job-search command center. The UI is Arabic-first, RTL, mobile-first, and served by a small Rust/Axum backend.",
+  "private": true,
+  "main": "index.js",
+  "scripts": {
+    "check:js": "node --check public/app.js",
+    "check:contract": "node tools/check-contract.mjs",
+    "qa:ui": "playwright test qa/interaction-check.spec.js --reporter=line"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "@playwright/test": "^1.61.1"
+  }
+}

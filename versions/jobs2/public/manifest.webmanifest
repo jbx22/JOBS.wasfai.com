@@ -1,0 +1,18 @@
+{
+  "name": "JOBS.wasfai.com | مركز البحث عن العمل",
+  "short_name": "JOBS.wasfai.com",
+  "start_url": "/app",
+  "display": "standalone",
+  "dir": "rtl",
+  "lang": "ar",
+  "background_color": "#ffffff",
+  "theme_color": "#0f766e",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

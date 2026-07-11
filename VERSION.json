@@ -1,12 +1,47 @@
 {
-  "current": 1,
-  "lastDescription": "Initial MENA job-search command center PWA prototype: Arabic-first RTL mobile UI, 5-tab bottom nav (البحث/الوظائف/الإعدادات/الحساب/النتيجة), multi-select + bulk-move, sources + فحص تلقائي with Rust background worker, JSON-LD/HTML live connectors (WUZZUF, Bayt, Khamsat, generic), approved-API guard for LinkedIn/Indeed, 52-test green cargo test --lib",
-  "lastAt": "2026-07-11 00:12",
+  "current": 8,
+  "lastDescription": "Ignore user-owned data paths and finalize DeepSeek ghost writer defaults",
+  "lastAt": "2026-07-11 05:15",
   "history": [
     {
       "n": 1,
       "description": "Initial MENA job-search command center PWA prototype: Arabic-first RTL mobile UI, 5-tab bottom nav (البحث/الوظائف/الإعدادات/الحساب/النتيجة), multi-select + bulk-move, sources + فحص تلقائي with Rust background worker, JSON-LD/HTML live connectors (WUZZUF, Bayt, Khamsat, generic), approved-API guard for LinkedIn/Indeed, 52-test green cargo test --lib",
       "at": "2026-07-11 00:12"
+    },
+    {
+      "n": 2,
+      "description": "Add voice-dna.md, DATA_CONTRACT.md, tools/check-contract.mjs (system/user boundary + voice guardrail)",
+      "at": "2026-07-11 01:37"
+    },
+    {
+      "n": 3,
+      "description": "Launch Cloudflare Pages production with Functions bootstrap API, deployment handoff, and jobs.wasfai.com custom-domain setup",
+      "at": "2026-07-11 02:14"
+    },
+    {
+      "n": 4,
+      "description": "Mobile-first responsive PWA polish with desktop layout fix, install icons, and upgraded offline cache",
+      "at": "2026-07-11 02:54"
+    },
+    {
+      "n": 5,
+      "description": "Finalize jobs.wasfai.com active custom-domain handoff after DNS verification",
+      "at": "2026-07-11 02:56"
+    },
+    {
+      "n": 6,
+      "description": "Add production ghost writer for bilingual resume, cover letter, and interview preparation kits",
+      "at": "2026-07-11 03:32"
+    },
+    {
+      "n": 7,
+      "description": "Set DeepSeek V4 Flash as default ghost writer AI provider",
+      "at": "2026-07-11 05:14"
+    },
+    {
+      "n": 8,
+      "description": "Ignore user-owned data paths and finalize DeepSeek ghost writer defaults",
+      "at": "2026-07-11 05:15"
     }
   ]
 }

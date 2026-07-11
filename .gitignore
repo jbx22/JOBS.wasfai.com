@@ -1,6 +1,48 @@
-/target/
-/node_modules/
-/data/*.sqlite
-/test-results/
-/qa/*-profile/
-/qa/*.png
+# Rust
+target/
+**/*.rs.bk
+
+# Node
+node_modules/
+.npm/
+.wrangler/
+.cache/
+dist/
+build/
+
+# Logs and runtime
+*.log
+server.log
+server.log.err
+nohup.out
+test-results/
+playwright-report/
+qa/artifacts/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+*.swp
+
+# Local secrets
+.env
+.env.local
+*.pem
+
+# User-owned data contract paths
+data/
+voice-dna.md
+profile.yml
+config/
+cv.md
+applications.md
+output/
+reports/
+jds/
+interview-prep/
+voice/
+plugins.local/
