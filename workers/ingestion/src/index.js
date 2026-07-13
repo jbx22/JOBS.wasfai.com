@@ -93,14 +93,7 @@ async function scanSource(env, source) {
   if (!source || source.connector_mode !== "public_html") {
     throw new Error("Only public_html sources can be scanned without approved APIs.");
   }
-  const response = await fetch(source.url, {
-    headers: {
-      "User-Agent": "JOBS.wasfai.com ingestion bot; contact=admin@wasfai.com",
-      "Accept": "text/html,application/xhtml+xml",
-    },
-  });
-  if (!response.ok) throw new Error(`source returned ${response.status}`);
-  const html = await response.text();
+  const html = await fetchSourceHtml(env, source);
   const jobs = parseJobs(html, source).slice(0, 25);
   const now = new Date().toISOString();
   let inserted = 0;
@@ -121,6 +114,24 @@ async function scanSource(env, source) {
     "UPDATE sources SET last_scanned_at = ?1, next_scan_at = ?2, last_error = '', updated_at = ?1 WHERE id = ?3",
   ).bind(now, next, source.id).run();
   return { scanned: source.id, parsed: jobs.length, inserted };
+}
+
+async function fetchSourceHtml(env, source) {
+  const cacheKey = `source-html:${source.id}:${hash(source.url)}`;
+  const cached = env.JOBS_CACHE ? await env.JOBS_CACHE.get(cacheKey) : "";
+  if (cached) return cached;
+  const response = await fetch(source.url, {
+    headers: {
+      "User-Agent": "JOBS.wasfai.com ingestion bot; contact=admin@wasfai.com",
+      "Accept": "text/html,application/xhtml+xml",
+    },
+  });
+  if (!response.ok) throw new Error(`source returned ${response.status}`);
+  const html = await response.text();
+  if (env.JOBS_CACHE) {
+    await env.JOBS_CACHE.put(cacheKey, html, { expirationTtl: 900 });
+  }
+  return html;
 }
 
 function parseJobs(html, source) {

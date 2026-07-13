@@ -5,6 +5,7 @@ Cloudflare Worker for full live crawling ingestion:
 - **Cron** runs every 30 minutes and enqueues due sources.
 - **Queue** consumes source scan jobs.
 - **D1** stores sources, normalized jobs, scan timestamps, dedupe keys, and errors.
+- **KV** caches fetched source HTML briefly so retries and smoke tests do not hammer job boards.
 - **HTTP admin/read API** exposes `/health`, `/sources`, `/jobs`, `/match`, `/admin/scan-now`, and `/admin/enqueue-due`.
 - **Clean ingestion** prefers JSON-LD `JobPosting` data, rejects browse/category pages, dedupes jobs, and only returns likely real roles.
 - **Resume-first matching** accepts the approved master-resume profile at `/match` and scores stored jobs against target titles, skills, locations, seniority, and resume text.

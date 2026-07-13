@@ -1,7 +1,7 @@
 {
-  "current": 15,
-  "lastDescription": "Tighten live crawler category filters after match smoke",
-  "lastAt": "2026-07-13 07:47",
+  "current": 16,
+  "lastDescription": "Add KV crawler cache and Google OAuth account foundation",
+  "lastAt": "2026-07-13 09:29",
   "history": [
     {
       "n": 1,
@@ -77,6 +77,11 @@
       "n": 15,
       "description": "Tighten live crawler category filters after match smoke",
       "at": "2026-07-13 07:47"
+    },
+    {
+      "n": 16,
+      "description": "Add KV crawler cache and Google OAuth account foundation",
+      "at": "2026-07-13 09:29"
     }
   ]
 }

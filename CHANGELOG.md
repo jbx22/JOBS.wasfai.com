@@ -60,3 +60,7 @@
 
 - Tighten live crawler category filters after match smoke
 
+## jobs16 — 2026-07-13 09:29
+
+- Add KV crawler cache and Google OAuth account foundation
+
