@@ -36,3 +36,7 @@
 
 - Add subscriber original resume editor, friendly how-it-works guidance, and deeper ghostwriter resume output
 
+## jobs10 — 2026-07-13 04:42
+
+- Add Cloudflare ingestion worker, AI Writer model selection, approved DOCX/PDF exports, and interactive interview prep
+

@@ -1,7 +1,7 @@
 {
-  "current": 9,
-  "lastDescription": "Add subscriber original resume editor, friendly how-it-works guidance, and deeper ghostwriter resume output",
-  "lastAt": "2026-07-13 04:05",
+  "current": 10,
+  "lastDescription": "Add Cloudflare ingestion worker, AI Writer model selection, approved DOCX/PDF exports, and interactive interview prep",
+  "lastAt": "2026-07-13 04:42",
   "history": [
     {
       "n": 1,
@@ -47,6 +47,11 @@
       "n": 9,
       "description": "Add subscriber original resume editor, friendly how-it-works guidance, and deeper ghostwriter resume output",
       "at": "2026-07-13 04:05"
+    },
+    {
+      "n": 10,
+      "description": "Add Cloudflare ingestion worker, AI Writer model selection, approved DOCX/PDF exports, and interactive interview prep",
+      "at": "2026-07-13 04:42"
     }
   ]
 }

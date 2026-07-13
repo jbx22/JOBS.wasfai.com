@@ -4,6 +4,7 @@ Sequential snapshots of the project. Each version is a frozen copy of the source
 
 | Version | Date | Description |
 | --- | --- | --- |
+| jobs10 | 2026-07-13 04:42 | Add Cloudflare ingestion worker, AI Writer model selection, approved DOCX/PDF exports, and interactive interview prep |
 | jobs9 | 2026-07-13 04:05 | Add subscriber original resume editor, friendly how-it-works guidance, and deeper ghostwriter resume output |
 | jobs8 | 2026-07-11 05:15 | Ignore user-owned data paths and finalize DeepSeek ghost writer defaults |
 | jobs7 | 2026-07-11 05:14 | Set DeepSeek V4 Flash as default ghost writer AI provider |
