@@ -165,26 +165,10 @@ async function maybeGenerateWithAi(env, job, profile, writer) {
       provider: writer.provider || "ai",
       writer_label: writer.label || "AI Writer",
       model,
-      ...validateKit(parseAiJson(text), job, profile),
+      ...validateKit(JSON.parse(text), job, profile),
     };
   } catch {
     return null;
-  }
-}
-
-function parseAiJson(text) {
-  const cleaned = String(text || "")
-    .trim()
-    .replace(/^```(?:json)?\s*/i, "")
-    .replace(/\s*```$/i, "")
-    .trim();
-  try {
-    return JSON.parse(cleaned);
-  } catch {
-    const start = cleaned.indexOf("{");
-    const end = cleaned.lastIndexOf("}");
-    if (start < 0 || end <= start) throw new Error("AI response did not contain a JSON object.");
-    return JSON.parse(cleaned.slice(start, end + 1));
   }
 }
 

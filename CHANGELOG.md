@@ -40,3 +40,11 @@
 
 - Add Cloudflare ingestion worker, AI Writer model selection, approved DOCX/PDF exports, and interactive interview prep
 
+## jobs11 — 2026-07-13 05:42
+
+- Route MiniMax GLM and Kimi AI Writer models through OpenRouter
+
+## jobs12 — 2026-07-13 05:50
+
+- Harden OpenRouter AI Writer JSON parsing
+

@@ -1,7 +1,7 @@
 {
-  "current": 10,
-  "lastDescription": "Add Cloudflare ingestion worker, AI Writer model selection, approved DOCX/PDF exports, and interactive interview prep",
-  "lastAt": "2026-07-13 04:42",
+  "current": 12,
+  "lastDescription": "Harden OpenRouter AI Writer JSON parsing",
+  "lastAt": "2026-07-13 05:50",
   "history": [
     {
       "n": 1,
@@ -52,6 +52,16 @@
       "n": 10,
       "description": "Add Cloudflare ingestion worker, AI Writer model selection, approved DOCX/PDF exports, and interactive interview prep",
       "at": "2026-07-13 04:42"
+    },
+    {
+      "n": 11,
+      "description": "Route MiniMax GLM and Kimi AI Writer models through OpenRouter",
+      "at": "2026-07-13 05:42"
+    },
+    {
+      "n": 12,
+      "description": "Harden OpenRouter AI Writer JSON parsing",
+      "at": "2026-07-13 05:50"
     }
   ]
 }
