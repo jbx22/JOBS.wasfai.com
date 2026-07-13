@@ -1,7 +1,7 @@
 {
-  "current": 8,
-  "lastDescription": "Ignore user-owned data paths and finalize DeepSeek ghost writer defaults",
-  "lastAt": "2026-07-11 05:15",
+  "current": 9,
+  "lastDescription": "Add subscriber original resume editor, friendly how-it-works guidance, and deeper ghostwriter resume output",
+  "lastAt": "2026-07-13 04:05",
   "history": [
     {
       "n": 1,
@@ -42,6 +42,11 @@
       "n": 8,
       "description": "Ignore user-owned data paths and finalize DeepSeek ghost writer defaults",
       "at": "2026-07-11 05:15"
+    },
+    {
+      "n": 9,
+      "description": "Add subscriber original resume editor, friendly how-it-works guidance, and deeper ghostwriter resume output",
+      "at": "2026-07-13 04:05"
     }
   ]
 }

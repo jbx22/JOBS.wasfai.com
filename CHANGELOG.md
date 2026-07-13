@@ -32,3 +32,7 @@
 
 - Ignore user-owned data paths and finalize DeepSeek ghost writer defaults
 
+## jobs9 — 2026-07-13 04:05
+
+- Add subscriber original resume editor, friendly how-it-works guidance, and deeper ghostwriter resume output
+
