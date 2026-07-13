@@ -52,3 +52,11 @@
 
 - Add resume-first AI coach workflow and remove Kimi model
 
+## jobs14 — 2026-07-13 07:44
+
+- Implement resume-approved live job matching and clean crawler filters
+
+## jobs15 — 2026-07-13 07:47
+
+- Tighten live crawler category filters after match smoke
+

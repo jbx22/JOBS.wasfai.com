@@ -1,7 +1,7 @@
 {
-  "current": 13,
-  "lastDescription": "Add resume-first AI coach workflow and remove Kimi model",
-  "lastAt": "2026-07-13 06:17",
+  "current": 15,
+  "lastDescription": "Tighten live crawler category filters after match smoke",
+  "lastAt": "2026-07-13 07:47",
   "history": [
     {
       "n": 1,
@@ -67,6 +67,16 @@
       "n": 13,
       "description": "Add resume-first AI coach workflow and remove Kimi model",
       "at": "2026-07-13 06:17"
+    },
+    {
+      "n": 14,
+      "description": "Implement resume-approved live job matching and clean crawler filters",
+      "at": "2026-07-13 07:44"
+    },
+    {
+      "n": 15,
+      "description": "Tighten live crawler category filters after match smoke",
+      "at": "2026-07-13 07:47"
     }
   ]
 }

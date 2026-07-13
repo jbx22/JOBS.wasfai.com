@@ -4,6 +4,8 @@ Sequential snapshots of the project. Each version is a frozen copy of the source
 
 | Version | Date | Description |
 | --- | --- | --- |
+| jobs15 | 2026-07-13 07:47 | Tighten live crawler category filters after match smoke |
+| jobs14 | 2026-07-13 07:44 | Implement resume-approved live job matching and clean crawler filters |
 | jobs13 | 2026-07-13 06:17 | Add resume-first AI coach workflow and remove Kimi model |
 | jobs12 | 2026-07-13 05:50 | Harden OpenRouter AI Writer JSON parsing |
 | jobs11 | 2026-07-13 05:42 | Route MiniMax GLM and Kimi AI Writer models through OpenRouter |
