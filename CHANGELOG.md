@@ -48,3 +48,7 @@
 
 - Harden OpenRouter AI Writer JSON parsing
 
+## jobs13 — 2026-07-13 06:17
+
+- Add resume-first AI coach workflow and remove Kimi model
+

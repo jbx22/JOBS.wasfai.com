@@ -1,7 +1,7 @@
 {
-  "current": 12,
-  "lastDescription": "Harden OpenRouter AI Writer JSON parsing",
-  "lastAt": "2026-07-13 05:50",
+  "current": 13,
+  "lastDescription": "Add resume-first AI coach workflow and remove Kimi model",
+  "lastAt": "2026-07-13 06:17",
   "history": [
     {
       "n": 1,
@@ -62,6 +62,11 @@
       "n": 12,
       "description": "Harden OpenRouter AI Writer JSON parsing",
       "at": "2026-07-13 05:50"
+    },
+    {
+      "n": 13,
+      "description": "Add resume-first AI coach workflow and remove Kimi model",
+      "at": "2026-07-13 06:17"
     }
   ]
 }
