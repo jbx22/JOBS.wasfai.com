@@ -33,6 +33,14 @@ CREATE INDEX IF NOT EXISTS idx_jobs_source_id ON jobs(source_id);
 CREATE INDEX IF NOT EXISTS idx_jobs_score ON jobs(score);
 CREATE INDEX IF NOT EXISTS idx_sources_due ON sources(enabled, next_scan_at);
 
+CREATE TABLE IF NOT EXISTS user_states (
+  user_id TEXT PRIMARY KEY,
+  email TEXT NOT NULL DEFAULT '',
+  payload TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 INSERT OR IGNORE INTO sources
   (id, label, url, region, query, enabled, connector_mode, interval_minutes, next_scan_at)
 VALUES

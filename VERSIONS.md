@@ -4,6 +4,28 @@ Sequential snapshots of the project. Each version is a frozen copy of the source
 
 | Version | Date | Description |
 | --- | --- | --- |
+| jobs38 | 2026-07-14 13:23 | Fix Arabic resume upload and account localization |
+| jobs37 | 2026-07-14 13:03 | Use the approved editable master resume in the browser AI fallback |
+| jobs36 | 2026-07-14 13:00 | Make subscriber AI workflow editable with approved bilingual master resumes, per-job tailoring briefs, editable application documents, durable state, and mock interview coaching |
+| jobs35 | 2026-07-14 12:46 | Add durable application tracker follow-up queue and safe partial job updates |
+| jobs34 | 2026-07-14 12:37 | Add official Saudi enterprise career portals for Aramco SABIC stc PIF NEOM Maaden and SAB |
+| jobs33 | 2026-07-14 11:58 | Stabilize production OAuth redirect QA without following the external Google redirect |
+| jobs32 | 2026-07-14 11:57 | Add verified Saudi government and regional job portals with direct portal access |
+| jobs31 | 2026-07-14 11:47 | Wire authenticated source scans to live ingestion worker results instead of placeholder jobs |
+| jobs30 | 2026-07-14 11:36 | Add Arabic-English browser OCR for scanned resume PDFs and replace stale UI QA wiring |
+| jobs29 | 2026-07-14 09:33 | Arabic-first resume journey, remove IT/Rust assumptions, safer PDF resume extraction |
+| jobs28 | 2026-07-14 09:20 | pre-fix rollback before Arabic resume and AI assumption cleanup |
+| jobs27 | 2026-07-14 07:02 | add browser-side AI fallback so package generation never hangs |
+| jobs26 | 2026-07-14 06:59 | finalize AI timeout fallback for responsive website journey |
+| jobs25 | 2026-07-14 06:55 | fix resume upload journey, find-jobs proxy and fallback, guest buttons, AI package visibility, and side-menu workflow |
+| jobs24 | 2026-07-14 06:45 | pre-fix rollback before making buttons, AI, find-jobs, and resume upload reliable |
+| jobs23 | 2026-07-14 06:14 | resume-first mobile journey with bigger logo, PDF upload, hidden source preview, and relevance-only jobs |
+| jobs22 | 2026-07-14 06:07 | pre-change rollback before resume-first journey and logo sizing fixes |
+| jobs21 | 2026-07-14 05:24 | Add uploaded JOBS logo and PWA install icon assets |
+| jobs20 | 2026-07-14 05:15 | Scope production QA to live qa folder after Arabic theme tests |
+| jobs19 | 2026-07-14 05:13 | Arabic-default landing, English switcher, and day-night theme toggle |
+| jobs18 | 2026-07-14 05:00 | Mobile command home, authenticated D1 workspace persistence, source workflow, export validation, production QA |
+| jobs17 | 2026-07-13 09:55 | Add assisted apply package CTA and follow-up tracker |
 | jobs16 | 2026-07-13 09:29 | Add KV crawler cache and Google OAuth account foundation |
 | jobs15 | 2026-07-13 07:47 | Tighten live crawler category filters after match smoke |
 | jobs14 | 2026-07-13 07:44 | Implement resume-approved live job matching and clean crawler filters |

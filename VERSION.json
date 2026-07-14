@@ -1,7 +1,7 @@
 {
-  "current": 16,
-  "lastDescription": "Add KV crawler cache and Google OAuth account foundation",
-  "lastAt": "2026-07-13 09:29",
+  "current": 38,
+  "lastDescription": "Fix Arabic resume upload and account localization",
+  "lastAt": "2026-07-14 13:23",
   "history": [
     {
       "n": 1,
@@ -82,6 +82,116 @@
       "n": 16,
       "description": "Add KV crawler cache and Google OAuth account foundation",
       "at": "2026-07-13 09:29"
+    },
+    {
+      "n": 17,
+      "description": "Add assisted apply package CTA and follow-up tracker",
+      "at": "2026-07-13 09:55"
+    },
+    {
+      "n": 18,
+      "description": "Mobile command home, authenticated D1 workspace persistence, source workflow, export validation, production QA",
+      "at": "2026-07-14 05:00"
+    },
+    {
+      "n": 19,
+      "description": "Arabic-default landing, English switcher, and day-night theme toggle",
+      "at": "2026-07-14 05:13"
+    },
+    {
+      "n": 20,
+      "description": "Scope production QA to live qa folder after Arabic theme tests",
+      "at": "2026-07-14 05:15"
+    },
+    {
+      "n": 21,
+      "description": "Add uploaded JOBS logo and PWA install icon assets",
+      "at": "2026-07-14 05:24"
+    },
+    {
+      "n": 22,
+      "description": "pre-change rollback before resume-first journey and logo sizing fixes",
+      "at": "2026-07-14 06:07"
+    },
+    {
+      "n": 23,
+      "description": "resume-first mobile journey with bigger logo, PDF upload, hidden source preview, and relevance-only jobs",
+      "at": "2026-07-14 06:14"
+    },
+    {
+      "n": 24,
+      "description": "pre-fix rollback before making buttons, AI, find-jobs, and resume upload reliable",
+      "at": "2026-07-14 06:45"
+    },
+    {
+      "n": 25,
+      "description": "fix resume upload journey, find-jobs proxy and fallback, guest buttons, AI package visibility, and side-menu workflow",
+      "at": "2026-07-14 06:55"
+    },
+    {
+      "n": 26,
+      "description": "finalize AI timeout fallback for responsive website journey",
+      "at": "2026-07-14 06:59"
+    },
+    {
+      "n": 27,
+      "description": "add browser-side AI fallback so package generation never hangs",
+      "at": "2026-07-14 07:02"
+    },
+    {
+      "n": 28,
+      "description": "pre-fix rollback before Arabic resume and AI assumption cleanup",
+      "at": "2026-07-14 09:20"
+    },
+    {
+      "n": 29,
+      "description": "Arabic-first resume journey, remove IT/Rust assumptions, safer PDF resume extraction",
+      "at": "2026-07-14 09:33"
+    },
+    {
+      "n": 30,
+      "description": "Add Arabic-English browser OCR for scanned resume PDFs and replace stale UI QA wiring",
+      "at": "2026-07-14 11:36"
+    },
+    {
+      "n": 31,
+      "description": "Wire authenticated source scans to live ingestion worker results instead of placeholder jobs",
+      "at": "2026-07-14 11:47"
+    },
+    {
+      "n": 32,
+      "description": "Add verified Saudi government and regional job portals with direct portal access",
+      "at": "2026-07-14 11:57"
+    },
+    {
+      "n": 33,
+      "description": "Stabilize production OAuth redirect QA without following the external Google redirect",
+      "at": "2026-07-14 11:58"
+    },
+    {
+      "n": 34,
+      "description": "Add official Saudi enterprise career portals for Aramco SABIC stc PIF NEOM Maaden and SAB",
+      "at": "2026-07-14 12:37"
+    },
+    {
+      "n": 35,
+      "description": "Add durable application tracker follow-up queue and safe partial job updates",
+      "at": "2026-07-14 12:46"
+    },
+    {
+      "n": 36,
+      "description": "Make subscriber AI workflow editable with approved bilingual master resumes, per-job tailoring briefs, editable application documents, durable state, and mock interview coaching",
+      "at": "2026-07-14 13:00"
+    },
+    {
+      "n": 37,
+      "description": "Use the approved editable master resume in the browser AI fallback",
+      "at": "2026-07-14 13:03"
+    },
+    {
+      "n": 38,
+      "description": "Fix Arabic resume upload and account localization",
+      "at": "2026-07-14 13:23"
     }
   ]
 }
