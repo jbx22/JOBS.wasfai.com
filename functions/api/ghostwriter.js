@@ -232,6 +232,8 @@ function buildPrompt(job, profile) {
     },
     style_rules: [
       "Arabic and English must be separate outputs.",
+      "LANGUAGE GATE: en_resume, en_cover_letter, and every en_interview_prep item must be written entirely in English. Do not use Arabic script in those English fields, even when the source resume or job post is Arabic; translate the meaning into English.",
+      "LANGUAGE GATE: ar_resume, ar_cover_letter, and ar_interview_prep must be written in Arabic.",
       "The resume outputs must not be one paragraph.",
       "Each resume must include titled sections, bullets, and line breaks.",
       "Each resume must cover: headline, professional summary, core skills, selected achievements, relevant experience positioning, education/certifications if present, ATS keywords, and tailoring notes.",
@@ -253,11 +255,11 @@ function validateKit(raw, job, profile) {
   const fallback = buildFallbackKit(job, profile);
   return {
     ar_resume: ensureResumeDepth(cleanText(raw.ar_resume), fallback.ar_resume),
-    en_resume: ensureResumeDepth(cleanText(raw.en_resume), fallback.en_resume),
+    en_resume: ensureEnglishResume(raw.en_resume, fallback.en_resume),
     ar_cover_letter: cleanText(raw.ar_cover_letter),
-    en_cover_letter: cleanText(raw.en_cover_letter),
+    en_cover_letter: ensureEnglishText(raw.en_cover_letter, fallback.en_cover_letter),
     ar_interview_prep: cleanList(raw.ar_interview_prep),
-    en_interview_prep: cleanList(raw.en_interview_prep),
+    en_interview_prep: ensureEnglishList(raw.en_interview_prep, fallback.en_interview_prep),
     keyword_gaps: cleanList(raw.keyword_gaps),
     next_actions: cleanList(raw.next_actions),
   };
@@ -268,6 +270,7 @@ function buildFallbackKit(job, profile) {
   const examples = profile.resume_work_examples || "تنفيذ مشاريع وتشغيل وصيانة وتحسين أداء في بيئات صناعية";
   const regions = profile.resume_regions || profile.target_locations || job.location || "MENA";
   const resumeSignals = summarizeOriginalResume(profile.resume_text);
+  const english = englishContext(job, profile);
 
   return {
     ar_resume:
@@ -295,27 +298,27 @@ function buildFallbackKit(job, profile) {
       `- مراجعة المسمى والمهارات مقابل إعلان ${job.employer} قبل التقديم.`,
     en_resume:
       `Professional Headline\n` +
-      `${profile.display_name} - candidate for the ${job.title} role at ${job.employer}, positioned around ${skills}.\n\n` +
+      `${english.name} - candidate for the ${english.title} role at ${english.employer}, positioned around ${english.skills}.\n\n` +
       `Professional Summary\n` +
-      `Candidate targeting ${job.title} in ${job.location || regions}. This version reframes the profile around ${examples} and highlights the evidence most relevant to ${job.employer}. The language stays direct, ATS-friendly, and grounded in the supplied resume/profile details.\n\n` +
+      `Candidate targeting ${english.title} in ${english.location}. This version emphasizes industrial project delivery, operations, and measurable improvement while keeping every claim grounded in the supplied resume.\n\n` +
       `Core Skills\n` +
-      `- ${skills}.\n` +
-      `- Working languages: ${profile.resume_languages || "Arabic, English"}.\n` +
-      `- Regional exposure: ${regions}.\n` +
-      `- Seniority: ${profile.resume_seniority || "Senior"}.\n\n` +
+      `- ${english.skills}.\n` +
+      `- Working languages: ${englishSafe(profile.resume_languages, "Arabic and English")}.\n` +
+      `- Regional exposure: ${english.location}.\n` +
+      `- Seniority: ${englishSafe(profile.resume_seniority, "Senior professional")}.\n\n` +
       `Selected Achievements and Experience Positioning\n` +
-      `- ${examples}.\n` +
-      `- Connect prior work to the role need: ${job.description || job.fit_explanation || "execution quality, delivery discipline, and measurable outcomes"}.\n` +
+      `- ${english.examples}.\n` +
+      `- Connect prior work to the role need: execution quality, delivery discipline, and measurable outcomes.\n` +
       `- Keep the strongest matching skills near the top of the CV and support them with practical examples.\n` +
-      `- Adapt the CV for ${job.location || regions} with a clear structure: summary, skills, experience, education, certifications, and keywords.\n\n` +
+      `- Adapt the CV for ${english.location} with a clear structure: summary, skills, experience, education, certifications, and keywords.\n\n` +
       `Signals from Original Resume\n` +
       `${resumeSignals.en}\n\n` +
       `Suggested ATS Keywords\n` +
-      `- ${(extractKeywordGaps(job, skills).join("\n- ") || skills)}\n\n` +
+      `- ${(extractKeywordGaps(job, english.skills).join("\n- ") || english.skills)}\n\n` +
       `Tailoring Notes Before Sending\n` +
       `- Replace any generic example with a measured result from the original resume.\n` +
       `- Place the strongest matching achievement in the top third of the CV.\n` +
-      `- Review the title and skills against ${job.employer}'s posting before applying.`,
+      `- Review the title and skills against the employer's posting before applying.`,
     ar_cover_letter:
       `السادة فريق التوظيف في ${job.employer}،\n\n` +
       `أرفق اهتمامي بدور ${job.title}. ما جذبني في هذه الفرصة هو ارتباطها المباشر بخبرتي في ${skills}، ` +
@@ -324,10 +327,10 @@ function buildFallbackKit(job, profile) {
       `يسعدني مشاركة تفاصيل أكثر عند ترتيب مقابلة.\n\n` +
       `مع التحية،\n${profile.display_name}`,
     en_cover_letter:
-      `Dear ${job.employer} hiring team,\n\n` +
-      `I am applying for the ${job.title} role. The opportunity aligns with my work in ${skills} and with projects where clear execution, practical judgment, and measurable outcomes matter.\n\n` +
-      `In an interview, I would highlight examples from ${examples} and connect them directly to the needs of this role. I would welcome the chance to discuss how I can contribute.\n\n` +
-      `Regards,\n${profile.display_name}`,
+      `Dear Hiring Team,\n\n` +
+      `I am applying for the ${english.title} role. The opportunity aligns with my work in ${english.skills} and with projects where clear execution, practical judgment, and measurable outcomes matter.\n\n` +
+      `In an interview, I would highlight examples from ${english.examples} and connect them directly to the needs of this role. I would welcome the chance to discuss how I can contribute.\n\n` +
+      `Regards,\n${english.name}`,
     ar_interview_prep: [
       `عرّف بنفسك لهذا الدور: ابدأ بخبرتك الأقرب لـ ${job.title} ثم اربطها باحتياج ${job.employer}.`,
       `لماذا هذه الشركة؟ اذكر السوق أو المنتج أو طبيعة الدور، ثم مثالاً عملياً من خبرتك.`,
@@ -336,7 +339,7 @@ function buildFallbackKit(job, profile) {
       `ما أسئلتك لهم؟ اسأل عن أول 90 يوماً، مقاييس النجاح، والفريق الذي ستعمل معه.`,
     ],
     en_interview_prep: [
-      `Tell me about yourself: start with the experience closest to ${job.title}, then connect it to ${job.employer}'s need.`,
+      `Tell me about yourself: start with the experience closest to the ${english.title} role, then connect it to the employer's need.`,
       `Why this company? Mention the market, operating environment, or role context, then add one practical example.`,
       `What is your strongest evidence? Prepare a short story: problem, action, result, and how it applies here.`,
       `What is a possible gap? Give a direct answer with a clear learning or mitigation plan.`,
@@ -350,6 +353,44 @@ function buildFallbackKit(job, profile) {
       "Practice the interview opener out loud once before applying.",
     ],
   };
+}
+
+function englishContext(job, profile) {
+  return {
+    name: englishSafe(profile.display_name, "Candidate"),
+    title: englishSafe(job.title, "target position"),
+    employer: englishSafe(job.employer, "the employer"),
+    location: englishSafe(job.location || profile.resume_regions || profile.target_locations, "Saudi Arabia and the GCC"),
+    skills: englishSafe(profile.resume_skills, "industrial project delivery, operations, maintenance, and continuous improvement"),
+    examples: englishSafe(profile.resume_work_examples, "industrial project delivery, operations, maintenance, and performance improvement"),
+  };
+}
+
+function englishSafe(value, fallback) {
+  const text = cleanText(value);
+  return isEnglishText(text) ? text : fallback;
+}
+
+function isEnglishText(value) {
+  const text = cleanText(value);
+  const latin = (text.match(/[A-Za-z]/g) || []).length;
+  const arabic = (text.match(/[\u0600-\u06FF]/g) || []).length;
+  return latin >= 3 && arabic <= Math.max(2, Math.floor(latin * 0.08));
+}
+
+function ensureEnglishResume(value, fallback) {
+  const text = ensureResumeDepth(cleanText(value), fallback);
+  return isEnglishText(text) ? text : fallback;
+}
+
+function ensureEnglishText(value, fallback) {
+  const text = cleanText(value);
+  return isEnglishText(text) ? text : fallback;
+}
+
+function ensureEnglishList(value, fallback) {
+  const list = cleanList(value);
+  return list.length && list.every(isEnglishText) ? list : fallback;
 }
 
 function extractKeywordGaps(job, skills) {
@@ -388,7 +429,7 @@ function summarizeOriginalResume(text) {
   }
   return {
     ar: lines.map((line) => `- ${line}`).join("\n"),
-    en: lines.map((line) => `- ${line}`).join("\n"),
+    en: lines.filter(isEnglishText).map((line) => `- ${line}`).join("\n") || "- The original resume is primarily Arabic; use the verified Arabic source when checking factual details.",
   };
 }
 

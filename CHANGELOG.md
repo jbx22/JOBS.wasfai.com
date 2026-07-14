@@ -152,3 +152,7 @@
 
 - Fix Arabic resume upload and account localization
 
+## jobs39 — 2026-07-14 13:42
+
+- Enforce English application-kit output
+

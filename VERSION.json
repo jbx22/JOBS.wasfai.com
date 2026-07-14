@@ -1,7 +1,7 @@
 {
-  "current": 38,
-  "lastDescription": "Fix Arabic resume upload and account localization",
-  "lastAt": "2026-07-14 13:23",
+  "current": 39,
+  "lastDescription": "Enforce English application-kit output",
+  "lastAt": "2026-07-14 13:42",
   "history": [
     {
       "n": 1,
@@ -192,6 +192,11 @@
       "n": 38,
       "description": "Fix Arabic resume upload and account localization",
       "at": "2026-07-14 13:23"
+    },
+    {
+      "n": 39,
+      "description": "Enforce English application-kit output",
+      "at": "2026-07-14 13:42"
     }
   ]
 }

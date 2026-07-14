@@ -749,6 +749,7 @@ function clientFallbackKit(job, profile = state.profile) {
   const examples = profile.resume_work_examples || "تنفيذ مشاريع وتشغيل وصيانة وتحسين أداء في بيئات عملية";
   const regions = profile.resume_regions || profile.target_locations || job.location || "Saudi Arabia";
   const generatedAt = new Date().toISOString();
+  const english = clientEnglishContext(job, profile);
   return {
     job_id: job.id,
     generated_at: generatedAt,
@@ -762,23 +763,23 @@ function clientFallbackKit(job, profile = state.profile) {
       `إنجازات مختارة\n- ${examples}\n- اربط كل إنجاز برقم أو نتيجة قبل التقديم النهائي.\n\n` +
       `كلمات ATS\n${[job.title, job.employer, skills].filter(Boolean).join(", ")}`,
     en_resume:
-      `Professional Headline\n${name} - candidate for ${job.title} at ${job.employer}, positioned around ${skills}.\n\n` +
-      `Professional Summary\nThis version uses the approved master resume and highlights the evidence most relevant to ${job.title}. Keep factual claims grounded in the uploaded resume before applying.\n\n` +
-      `Core Skills\n- ${skills}\n- Target markets: ${regions}\n- Working languages: ${profile.resume_languages || "Arabic, English"}\n\n` +
-      `Selected Achievements\n- ${examples}\n- Add measurable results where available before final submission.\n\n` +
-      `ATS Keywords\n${[job.title, job.employer, skills].filter(Boolean).join(", ")}`,
+      `Professional Headline\n${english.name} - candidate for the ${english.title} role, positioned around ${english.skills}.\n\n` +
+      `Professional Summary\nThis version uses the approved master resume and highlights the evidence most relevant to the target position. Keep factual claims grounded in the uploaded resume before applying.\n\n` +
+      `Core Skills\n- ${english.skills}\n- Target markets: ${english.location}\n- Working languages: Arabic and English\n\n` +
+      `Selected Achievements\n- ${english.examples}\n- Add measurable results where available before final submission.\n\n` +
+      `ATS Keywords\n${english.skills}`,
     ar_cover_letter:
       `السلام عليكم،\n\nأرغب بالتقدم لدور ${job.title} لدى ${job.employer}. يوضح ملفي خبرة عملية في ${skills} مع أمثلة مرتبطة بـ ${examples}. سأراجع النسخة النهائية للتأكد من دقة كل معلومة قبل الإرسال.\n\nمع التحية،\n${name}`,
     en_cover_letter:
-      `Dear Hiring Team,\n\nI am interested in the ${job.title} role at ${job.employer}. My approved resume highlights experience in ${skills}, supported by work such as ${examples}. I will review the final version for factual accuracy before submitting.\n\nRegards,\n${name}`,
+      `Dear Hiring Team,\n\nI am interested in the ${english.title} role. My approved resume highlights experience in ${english.skills}, supported by work such as ${english.examples}. I will review the final version for factual accuracy before submitting.\n\nRegards,\n${english.name}`,
     ar_interview_prep: [
       `اربط إجابتك الأولى بسبب اهتمامك بدور ${job.title}.`,
       `جهز مثال STAR عن ${skills.split(",")[0] || "إنجاز مناسب"}.`,
       "اذكر فجوة واحدة بصدق ثم اشرح كيف ستغطيها بسرعة.",
     ],
     en_interview_prep: [
-      `Connect your opening answer to the ${job.title} role.`,
-      `Prepare a STAR example around ${skills.split(",")[0] || "a relevant achievement"}.`,
+      `Connect your opening answer to the ${english.title} role.`,
+      `Prepare a STAR example around ${english.skills.split(",")[0] || "a relevant achievement"}.`,
       "Name one gap honestly and explain your ramp-up plan.",
     ],
     next_actions: [
@@ -787,6 +788,46 @@ function clientFallbackKit(job, profile = state.profile) {
       "اعتمد الحزمة، ثم صدّر PDF أو DOCX.",
     ],
   };
+}
+
+function clientEnglishContext(job, profile) {
+  return {
+    name: clientEnglishSafe(profile.display_name, "Candidate"),
+    title: clientEnglishSafe(job.title, "target position"),
+    location: clientEnglishSafe(job.location || profile.resume_regions || profile.target_locations, "Saudi Arabia and the GCC"),
+    skills: clientEnglishSafe(profile.resume_skills, "industrial project delivery, operations, maintenance, and continuous improvement"),
+    examples: clientEnglishSafe(profile.resume_work_examples, "industrial project delivery, operations, maintenance, and performance improvement"),
+  };
+}
+
+function clientEnglishSafe(value, fallback) {
+  const text = String(value || "").trim();
+  const latin = (text.match(/[A-Za-z]/g) || []).length;
+  const arabic = (text.match(/[\u0600-\u06FF]/g) || []).length;
+  return latin >= 3 && arabic <= Math.max(2, Math.floor(latin * 0.08)) ? text : fallback;
+}
+
+function hasEnglishDraftLanguage(text) {
+  return clientEnglishSafe(text, "") === String(text || "").trim();
+}
+
+function repairStoredEnglishKits() {
+  let repaired = false;
+  for (const [jobId, kit] of Object.entries(state.ghostwriter || {})) {
+    const job = jobById(jobId);
+    if (!job || (!kit?.en_resume && !kit?.en_cover_letter)) continue;
+    if (hasEnglishDraftLanguage(kit.en_resume) && hasEnglishDraftLanguage(kit.en_cover_letter)) continue;
+    const fallback = clientFallbackKit(job, approvedProfile());
+    state.ghostwriter[jobId] = {
+      ...kit,
+      en_resume: fallback.en_resume,
+      en_cover_letter: fallback.en_cover_letter,
+      en_interview_prep: fallback.en_interview_prep,
+      language_repaired: true,
+    };
+    repaired = true;
+  }
+  return repaired;
 }
 
 function withFallbackTimeout(promise, fallback, ms = 10000) {
@@ -3417,6 +3458,7 @@ async function init() {
   }
   await loadWorkspaceState();
   state.profile = sanitizeLegacyProfile(state.profile || {});
+  if (repairStoredEnglishKits()) saveLocalAiWriterState();
   if (location.pathname === "/") history.replaceState(null, "", "/app");
   render();
   if ("serviceWorker" in navigator) {
