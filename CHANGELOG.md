@@ -168,3 +168,7 @@
 
 - Harden live ingestion and KV cache, evidence-based matching, liveness and ATS review gates, offline PWA, incremental domain storage, metrics, and authenticated release QA
 
+## jobs43 — 2026-07-14 20:41
+
+- Production security hardening: same-origin API enforcement, request limits, safer sessions, stronger browser isolation and cache headers, and crawler/security metadata
+

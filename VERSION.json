@@ -1,7 +1,7 @@
 {
-  "current": 42,
-  "lastDescription": "Harden live ingestion and KV cache, evidence-based matching, liveness and ATS review gates, offline PWA, incremental domain storage, metrics, and authenticated release QA",
-  "lastAt": "2026-07-14 20:18",
+  "current": 43,
+  "lastDescription": "Production security hardening: same-origin API enforcement, request limits, safer sessions, stronger browser isolation and cache headers, and crawler/security metadata",
+  "lastAt": "2026-07-14 20:41",
   "history": [
     {
       "n": 1,
@@ -212,6 +212,11 @@
       "n": 42,
       "description": "Harden live ingestion and KV cache, evidence-based matching, liveness and ATS review gates, offline PWA, incremental domain storage, metrics, and authenticated release QA",
       "at": "2026-07-14 20:18"
+    },
+    {
+      "n": 43,
+      "description": "Production security hardening: same-origin API enforcement, request limits, safer sessions, stronger browser isolation and cache headers, and crawler/security metadata",
+      "at": "2026-07-14 20:41"
     }
   ]
 }

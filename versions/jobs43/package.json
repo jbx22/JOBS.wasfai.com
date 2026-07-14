@@ -1,0 +1,30 @@
+{
+  "name": "mena-job-command-center",
+  "version": "1.0.0",
+  "description": "Design-prototype PWA for a MENA-focused job-search command center. The UI is Arabic-first, RTL, mobile-first, and served by a small Rust/Axum backend.",
+  "private": true,
+  "main": "index.js",
+  "scripts": {
+    "check:js": "node --check public/app.js",
+    "check:pwa": "node --check public/sw.js && node -e \"JSON.parse(require('fs').readFileSync('public/manifest.webmanifest','utf8'))\"",
+    "check:functions": "node --check functions/_middleware.js && node --check functions/api/bootstrap.js && node --check functions/api/_state.js && node --check functions/api/_security.js && node --check functions/api/ai-health.js && node --check functions/api/me/state.js && node --check functions/api/ghostwriter.js && node --check functions/api/ai-writer-chat.js && node --check functions/api/resume-coach.js && node --check functions/api/export-package.js && node --check functions/api/auth/_auth.js && node --check functions/api/auth/google/start.js && node --check functions/api/auth/google/callback.js && node --check functions/api/auth/session.js && node --check functions/api/auth/logout.js && node --check functions/api/auth/signup.js && node --check \"functions/api/[[route]].js\"",
+    "check:ingestion": "node --check workers/ingestion/src/index.js && node -e \"JSON.parse(require('fs').readFileSync('workers/ingestion/wrangler.jsonc','utf8'))\"",
+    "check:pdf": "node --check workers/pdf-renderer/src/index.js && node -e \"JSON.parse(require('fs').readFileSync('workers/pdf-renderer/wrangler.jsonc','utf8'))\"",
+    "check:contract": "node tools/check-contract.mjs",
+    "check:all": "npm run check:contract && npm run check:js && npm run check:pwa && npm run check:functions && npm run check:ingestion && npm run check:pdf",
+    "qa:ui": "playwright test --config=qa/local.config.js",
+    "qa:prod": "playwright test --config=qa/production.config.js",
+    "qa:prod-auth": "playwright test --config=qa/authenticated.config.js",
+    "deploy": "npm run check:all && wrangler pages deploy public --project-name jobs-wasfai --commit-dirty=true",
+    "deploy:ingestion": "wrangler deploy --config workers/ingestion/wrangler.jsonc",
+    "deploy:pdf": "wrangler deploy --config workers/pdf-renderer/wrangler.jsonc",
+    "deploy:help": "wrangler pages deploy --help"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "@playwright/test": "^1.61.1",
+    "wrangler": "^4.110.0"
+  }
+}
