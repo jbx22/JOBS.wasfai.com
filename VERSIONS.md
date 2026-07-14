@@ -4,6 +4,7 @@ Sequential snapshots of the project. Each version is a frozen copy of the source
 
 | Version | Date | Description |
 | --- | --- | --- |
+| jobs40 | 2026-07-14 13:43 | Refresh PWA cache for English kit fix |
 | jobs39 | 2026-07-14 13:42 | Enforce English application-kit output |
 | jobs38 | 2026-07-14 13:23 | Fix Arabic resume upload and account localization |
 | jobs37 | 2026-07-14 13:03 | Use the approved editable master resume in the browser AI fallback |

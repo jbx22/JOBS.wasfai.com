@@ -1,7 +1,7 @@
 {
-  "current": 39,
-  "lastDescription": "Enforce English application-kit output",
-  "lastAt": "2026-07-14 13:42",
+  "current": 40,
+  "lastDescription": "Refresh PWA cache for English kit fix",
+  "lastAt": "2026-07-14 13:43",
   "history": [
     {
       "n": 1,
@@ -197,6 +197,11 @@
       "n": 39,
       "description": "Enforce English application-kit output",
       "at": "2026-07-14 13:42"
+    },
+    {
+      "n": 40,
+      "description": "Refresh PWA cache for English kit fix",
+      "at": "2026-07-14 13:43"
     }
   ]
 }

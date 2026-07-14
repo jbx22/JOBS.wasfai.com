@@ -156,3 +156,7 @@
 
 - Enforce English application-kit output
 
+## jobs40 — 2026-07-14 13:43
+
+- Refresh PWA cache for English kit fix
+
