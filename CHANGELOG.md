@@ -200,3 +200,7 @@
 
 - Finalize verified DeepSeek V4 Flash production QA and factual-review export gate diagnostics
 
+## jobs51 — 2026-07-23 19:38
+
+- Add private encrypted D1 and R2 resume file storage with validated upload, download, replacement, and deletion
+

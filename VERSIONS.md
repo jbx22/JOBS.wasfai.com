@@ -4,6 +4,7 @@ Sequential snapshots of the project. Each version is a frozen copy of the source
 
 | Version | Date | Description |
 | --- | --- | --- |
+| jobs51 | 2026-07-23 19:38 | Add private encrypted D1 and R2 resume file storage with validated upload, download, replacement, and deletion |
 | jobs50 | 2026-07-23 19:22 | Finalize verified DeepSeek V4 Flash production QA and factual-review export gate diagnostics |
 | jobs49 | 2026-07-23 19:20 | Make DeepSeek V4 Flash generation resilient when second-pass review is unavailable |
 | jobs48 | 2026-07-23 19:17 | Refresh PWA cache for corrected header controls and account menu |
