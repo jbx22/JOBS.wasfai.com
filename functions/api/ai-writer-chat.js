@@ -7,6 +7,7 @@
  */
 
 const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
+import { recordAiUsage } from "./_ai_usage.js";
 import { requireProtectedRequest } from "./_security.js";
 
 const WRITERS = {
@@ -55,7 +56,7 @@ export async function onRequestPost(context) {
       return json({ error: "Missing interview question.", code: "BAD_REQUEST" }, 400);
     }
 
-    const ai = await askAi(writer, job, profile, kit, question, history);
+    const ai = await askAi(context, access.user, writer, job, profile, kit, question, history);
     if (!ai) return json({ error: "AI interview coaching is temporarily unavailable.", code: "AI_UNAVAILABLE" }, 503);
     return json(ai);
   } catch (error) {
@@ -74,7 +75,7 @@ export async function onRequestOptions() {
   return new Response(null, { status: 204, headers: corsHeaders() });
 }
 
-async function askAi(writer, job, profile, kit, question, history) {
+async function askAi(context, user, writer, job, profile, kit, question, history) {
   if (!writer.apiKey) return null;
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 12000);
@@ -126,6 +127,7 @@ async function askAi(writer, job, profile, kit, question, history) {
     });
     if (!response.ok) return null;
     const data = await response.json();
+    await recordAiUsage(context, user, { route: "ai-writer-chat", provider: writer.provider, model: writer.model, usage: data.usage, status: "ok" });
     const answer = String(data?.choices?.[0]?.message?.content || "").trim();
     if (!answer) return null;
     return {

@@ -13,6 +13,7 @@
 const DEEPSEEK_BASE_URL = "https://api.deepseek.com/v1";
 const DEEPSEEK_MODEL = "deepseek-v4-flash";
 const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
+import { recordAiUsage } from "./_ai_usage.js";
 import { requireProtectedRequest } from "./_security.js";
 
 const AI_WRITER_MODELS = {
@@ -59,7 +60,7 @@ export async function onRequestPost(context) {
     }
 
     const env = context.env || {};
-    const aiResult = await maybeGenerateWithAi(env, job, profile, writer);
+    const aiResult = await maybeGenerateWithAi(context, access.user, env, job, profile, writer);
     if (!aiResult) {
       return json({ error: "AI generation is temporarily unavailable. No template was returned as AI output.", code: "AI_UNAVAILABLE" }, 503);
     }
@@ -126,7 +127,7 @@ function normalizeProfile(profile) {
   };
 }
 
-async function maybeGenerateWithAi(env, job, profile, writer) {
+async function maybeGenerateWithAi(context, user, env, job, profile, writer) {
   const apiKey = writer.apiKey;
   if (!apiKey) return null;
 
@@ -162,11 +163,12 @@ async function maybeGenerateWithAi(env, job, profile, writer) {
 
     if (!response.ok) return null;
     const data = await response.json();
+    await recordAiUsage(context, user, { route: "ghostwriter.generate", provider: writer.provider, model, usage: data.usage, status: "ok" });
     const text = data?.choices?.[0]?.message?.content;
     if (!text) return null;
 
     const draft = validateKit(parseAiJson(text), job, profile);
-    const review = await reviewKitWithAi(writer, job, profile, draft);
+    const review = await reviewKitWithAi(context, user, writer, job, profile, draft);
     const qualityReview = review || {
       approved: false,
       factual_risks: [],
@@ -188,7 +190,7 @@ async function maybeGenerateWithAi(env, job, profile, writer) {
   }
 }
 
-async function reviewKitWithAi(writer, job, profile, kit) {
+async function reviewKitWithAi(context, user, writer, job, profile, kit) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 45_000);
   try {
@@ -208,7 +210,9 @@ async function reviewKitWithAi(writer, job, profile, kit) {
       }),
     });
     if (!response.ok) return null;
-    const raw = parseAiJson((await response.json())?.choices?.[0]?.message?.content || "");
+    const data = await response.json();
+    await recordAiUsage(context, user, { route: "ghostwriter.review", provider: writer.provider, model: writer.model, usage: data.usage, status: "ok" });
+    const raw = parseAiJson(data?.choices?.[0]?.message?.content || "");
     return {
       approved: raw.approved === true && cleanList(raw.factual_risks).length === 0,
       factual_risks: cleanList(raw.factual_risks), missing_evidence: cleanList(raw.missing_evidence),

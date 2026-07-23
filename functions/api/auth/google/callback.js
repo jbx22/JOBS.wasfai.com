@@ -1,4 +1,4 @@
-import { authConfig, clearStateCookie, clearTermsCookie, json, parseCookies, sessionCookie } from "../_auth.js";
+import { authConfig, clearReturnCookie, clearStateCookie, clearTermsCookie, json, parseCookies, sessionCookie } from "../_auth.js";
 
 export async function onRequestGet(context) {
   const request = context.request;
@@ -76,10 +76,17 @@ export async function onRequestGet(context) {
   return new Response(null, {
     status: 302,
     headers: [
-      ["Location", firstLogin ? "/onboarding" : "/account"],
+      ["Location", safeReturnPath(cookies.jobs_oauth_return) || (firstLogin ? "/onboarding" : "/account")],
       ["Set-Cookie", clearStateCookie()],
+      ["Set-Cookie", clearReturnCookie()],
       ["Set-Cookie", clearTermsCookie()],
       ["Set-Cookie", cookie],
     ],
   });
+}
+
+function safeReturnPath(value) {
+  if (!value || !value.startsWith("/") || value.startsWith("//")) return "";
+  if (/[\r\n]/.test(value)) return "";
+  return value.slice(0, 160);
 }

@@ -1,4 +1,4 @@
-import { authConfig, json, stateCookie, termsCookie } from "../_auth.js";
+import { authConfig, json, returnCookie, stateCookie, termsCookie } from "../_auth.js";
 
 export async function onRequestGet(context) {
   const config = authConfig(context.env || {}, context.request);
@@ -17,6 +17,14 @@ export async function onRequestGet(context) {
   url.searchParams.set("prompt", "select_account");
   const headers = new Headers({ "Location": url.toString() });
   headers.append("Set-Cookie", stateCookie(state));
+  const next = safeReturnPath(requestUrl.searchParams.get("next") || "");
+  if (next) headers.append("Set-Cookie", returnCookie(next));
   if (requestUrl.searchParams.get("terms") === "1") headers.append("Set-Cookie", termsCookie());
   return new Response(null, { status: 302, headers });
+}
+
+function safeReturnPath(value) {
+  if (!value || !value.startsWith("/") || value.startsWith("//")) return "";
+  if (/[\r\n]/.test(value)) return "";
+  return value.slice(0, 160);
 }

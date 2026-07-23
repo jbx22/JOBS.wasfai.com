@@ -9,6 +9,7 @@
 
 const DEEPSEEK_BASE_URL = "https://api.deepseek.com/v1";
 const DEEPSEEK_MODEL = "deepseek-v4-flash";
+import { recordAiUsage } from "./_ai_usage.js";
 import { requireProtectedRequest } from "./_security.js";
 
 export async function onRequestPost(context) {
@@ -22,7 +23,7 @@ export async function onRequestPost(context) {
       return json({ error: "Add the original resume text before improvement.", code: "RESUME_REQUIRED" }, 400);
     }
 
-    const ai = await improveWithDeepSeek(context.env || {}, profile);
+    const ai = await improveWithDeepSeek(context, access.user, context.env || {}, profile);
     if (!ai) return json({ error: "AI resume coaching is temporarily unavailable.", code: "AI_UNAVAILABLE" }, 503);
     return json(ai);
   } catch (error) {
@@ -41,7 +42,7 @@ export async function onRequestOptions() {
   return new Response(null, { status: 204, headers: corsHeaders() });
 }
 
-async function improveWithDeepSeek(env, profile) {
+async function improveWithDeepSeek(context, user, env, profile) {
   const apiKey = env.DEEPSEEK_API_KEY || env.AI_API_KEY;
   if (!apiKey) return null;
 
@@ -75,6 +76,7 @@ async function improveWithDeepSeek(env, profile) {
 
     if (!response.ok) return null;
     const data = await response.json();
+    await recordAiUsage(context, user, { route: "resume-coach", provider: "deepseek", model, usage: data.usage, status: "ok" });
     const text = data?.choices?.[0]?.message?.content;
     if (!text) return null;
 

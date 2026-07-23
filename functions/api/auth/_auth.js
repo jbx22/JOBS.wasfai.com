@@ -1,5 +1,6 @@
 const COOKIE_NAME = "jobs_session";
 const STATE_COOKIE = "jobs_oauth_state";
+const RETURN_COOKIE = "jobs_oauth_return";
 const TERMS_COOKIE = "jobs_terms_consent";
 
 export function authConfig(env, request) {
@@ -31,8 +32,16 @@ export function stateCookie(value) {
   return `${STATE_COOKIE}=${encodeURIComponent(value)}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=600`;
 }
 
+export function returnCookie(value) {
+  return `${RETURN_COOKIE}=${encodeURIComponent(value)}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=600`;
+}
+
 export function clearStateCookie() {
   return `${STATE_COOKIE}=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0`;
+}
+
+export function clearReturnCookie() {
+  return `${RETURN_COOKIE}=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0`;
 }
 
 export function termsCookie() {
