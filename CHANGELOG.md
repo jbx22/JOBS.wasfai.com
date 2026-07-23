@@ -204,3 +204,7 @@
 
 - Add private encrypted D1 and R2 resume file storage with validated upload, download, replacement, and deletion
 
+## jobs52 — 2026-07-23 21:27
+
+- Add secure Moyasar checkout, subscription activation, payment webhooks, and Billing & Moyasar admin console
+

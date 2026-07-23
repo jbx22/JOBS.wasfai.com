@@ -1,7 +1,7 @@
 {
-  "current": 51,
-  "lastDescription": "Add private encrypted D1 and R2 resume file storage with validated upload, download, replacement, and deletion",
-  "lastAt": "2026-07-23 19:38",
+  "current": 52,
+  "lastDescription": "Add secure Moyasar checkout, subscription activation, payment webhooks, and Billing & Moyasar admin console",
+  "lastAt": "2026-07-23 21:27",
   "history": [
     {
       "n": 1,
@@ -257,6 +257,11 @@
       "n": 51,
       "description": "Add private encrypted D1 and R2 resume file storage with validated upload, download, replacement, and deletion",
       "at": "2026-07-23 19:38"
+    },
+    {
+      "n": 52,
+      "description": "Add secure Moyasar checkout, subscription activation, payment webhooks, and Billing & Moyasar admin console",
+      "at": "2026-07-23 21:27"
     }
   ]
 }

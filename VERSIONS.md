@@ -4,6 +4,7 @@ Sequential snapshots of the project. Each version is a frozen copy of the source
 
 | Version | Date | Description |
 | --- | --- | --- |
+| jobs52 | 2026-07-23 21:27 | Add secure Moyasar checkout, subscription activation, payment webhooks, and Billing & Moyasar admin console |
 | jobs51 | 2026-07-23 19:38 | Add private encrypted D1 and R2 resume file storage with validated upload, download, replacement, and deletion |
 | jobs50 | 2026-07-23 19:22 | Finalize verified DeepSeek V4 Flash production QA and factual-review export gate diagnostics |
 | jobs49 | 2026-07-23 19:20 | Make DeepSeek V4 Flash generation resilient when second-pass review is unavailable |

@@ -1,0 +1,24 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "jobs-wasfai",
+  "pages_build_output_dir": "public",
+  "compatibility_date": "2026-07-11",
+  "compatibility_flags": ["nodejs_compat"],
+  "vars": {
+    "ENVIRONMENT": "production",
+    "BRAND": "JOBS.wasfai.com"
+  },
+  "d1_databases": [
+    {
+      "binding": "JOBS_DB",
+      "database_name": "jobs-wasfai-db",
+      "database_id": "8471b0c2-e32b-4bc0-84fe-d2b6250a374e"
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "RESUME_FILES",
+      "bucket_name": "jobs-wasfai-resumes"
+    }
+  ]
+}
