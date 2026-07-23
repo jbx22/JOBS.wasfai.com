@@ -1,7 +1,7 @@
 {
-  "current": 44,
-  "lastDescription": "Fix RTL sidebar branding, responsive overflow safeguards, and adaptive PWA orientation",
-  "lastAt": "2026-07-23 18:16",
+  "current": 46,
+  "lastDescription": "Finalize Google onboarding and QA release gate; extend AI provider timeout after production audit",
+  "lastAt": "2026-07-23 18:57",
   "history": [
     {
       "n": 1,
@@ -222,6 +222,16 @@
       "n": 44,
       "description": "Fix RTL sidebar branding, responsive overflow safeguards, and adaptive PWA orientation",
       "at": "2026-07-23 18:16"
+    },
+    {
+      "n": 45,
+      "description": "Add mobile account menu, dedicated Google signup, durable user records, consent, onboarding, and authenticated production QA",
+      "at": "2026-07-23 18:51"
+    },
+    {
+      "n": 46,
+      "description": "Finalize Google onboarding and QA release gate; extend AI provider timeout after production audit",
+      "at": "2026-07-23 18:57"
     }
   ]
 }

@@ -176,3 +176,11 @@
 
 - Fix RTL sidebar branding, responsive overflow safeguards, and adaptive PWA orientation
 
+## jobs45 — 2026-07-23 18:51
+
+- Add mobile account menu, dedicated Google signup, durable user records, consent, onboarding, and authenticated production QA
+
+## jobs46 — 2026-07-23 18:57
+
+- Finalize Google onboarding and QA release gate; extend AI provider timeout after production audit
+

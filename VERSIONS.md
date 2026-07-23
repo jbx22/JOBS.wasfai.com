@@ -4,6 +4,8 @@ Sequential snapshots of the project. Each version is a frozen copy of the source
 
 | Version | Date | Description |
 | --- | --- | --- |
+| jobs46 | 2026-07-23 18:57 | Finalize Google onboarding and QA release gate; extend AI provider timeout after production audit |
+| jobs45 | 2026-07-23 18:51 | Add mobile account menu, dedicated Google signup, durable user records, consent, onboarding, and authenticated production QA |
 | jobs44 | 2026-07-23 18:16 | Fix RTL sidebar branding, responsive overflow safeguards, and adaptive PWA orientation |
 | jobs43 | 2026-07-14 20:41 | Production security hardening: same-origin API enforcement, request limits, safer sessions, stronger browser isolation and cache headers, and crawler/security metadata |
 | jobs42 | 2026-07-14 20:18 | Harden live ingestion and KV cache, evidence-based matching, liveness and ATS review gates, offline PWA, incremental domain storage, metrics, and authenticated release QA |
