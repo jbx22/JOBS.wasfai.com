@@ -8,6 +8,7 @@ const state = {
   overview: null,
   users: [],
   subscribers: [],
+  billing: null,
   ai: null,
   audit: [],
   admins: [],
@@ -22,12 +23,14 @@ const NAV = mode === "super"
       ["admins", "Admin Team", "AT"],
       ["users", "Users", "US"],
       ["subscribers", "Subscribers", "SB"],
+      ["billing", "Billing & Moyasar", "PM"],
       ["ai", "AI & Cost", "AI"],
     ]
   : [
       ["overview", "Overview", "OV"],
       ["users", "Users", "US"],
       ["subscribers", "Subscribers", "SB"],
+      ["billing", "Billing & Moyasar", "PM"],
       ["ai", "AI & Cost", "AI"],
     ];
 
@@ -50,6 +53,7 @@ async function loadCurrent() {
   if (state.tab === "overview") state.overview = await api("/api/admin/overview");
   if (state.tab === "users") state.users = (await api(`/api/admin/users?q=${encodeURIComponent(state.q)}`)).users || [];
   if (state.tab === "subscribers") state.subscribers = (await api("/api/admin/subscribers")).subscribers || [];
+  if (state.tab === "billing") state.billing = await api("/api/admin/payments");
   if (state.tab === "ai") state.ai = await api("/api/admin/ai");
   if (state.tab === "audit") state.audit = (await api("/api/admin/audit")).audit || [];
   if (state.tab === "admins") state.admins = (await api("/api/admin/admins")).admins || [];
@@ -115,6 +119,7 @@ function renderTab() {
   if (state.tab === "overview") return renderOverview();
   if (state.tab === "users") return renderUsers();
   if (state.tab === "subscribers") return renderSubscribers();
+  if (state.tab === "billing") return renderBilling();
   if (state.tab === "ai") return renderAi();
   if (state.tab === "audit") return renderAudit();
   if (state.tab === "admins") return renderAdmins();
@@ -163,6 +168,59 @@ function renderSubscribers() {
           <td><div class="row-actions"><button class="btn" data-sub-edit="${esc(s.id)}">Manage</button></div></td>
         </tr>`).join("")}
       </tbody></table></div>${state.subscribers.length ? "" : `<div class="panel-body"><div class="empty">No subscribers yet.</div></div>`}
+    </section>`;
+}
+
+function renderBilling() {
+  const data = state.billing || {};
+  const gateway = data.gateway || {};
+  const summary = data.summary || {};
+  const canManage = state.admin?.role === "super_admin";
+  return `
+    <div class="grid kpis">
+      ${kpi("Gross payments", sar(summary.gross_sar), "recorded in SAR")}
+      ${kpi("Paid", summary.paid || 0, "successful payments")}
+      ${kpi("Pending", summary.pending || 0, "awaiting confirmation")}
+      ${kpi("Failed", summary.failed || 0, "failed or expired")}
+      ${kpi("Gateway", gateway.configured ? "Ready" : "Setup", gateway.webhook_configured ? "webhook secured" : "webhook secret missing")}
+    </div>
+    <section class="panel">
+      <div class="panel-head"><h2>Moyasar gateway</h2>${badge(gateway.configured ? "configured" : "not configured", gateway.configured ? "teal" : "rose")}</div>
+      <div class="panel-body stack">
+        <div class="setup-grid">
+          <div><small>Checkout callback</small><code>${esc(gateway.callback_url || "")}</code></div>
+          <div><small>Webhook endpoint</small><code>${esc(gateway.webhook_url || "")}</code></div>
+          <div><small>Required Cloudflare secrets</small><code>MOYASAR_SECRET_KEY · MOYASAR_WEBHOOK_SECRET</code></div>
+        </div>
+        <div class="alert ${gateway.configured && gateway.webhook_configured ? "teal" : ""}">
+          ${gateway.configured && gateway.webhook_configured
+            ? "Server-side checkout and signed webhook verification are ready."
+            : "Add the missing Cloudflare secrets, then register the webhook URL and matching secret token in Moyasar Dashboard."}
+        </div>
+      </div>
+    </section>
+    <section class="panel">
+      <div class="panel-head"><h2>Transactions</h2><button class="btn" data-refresh>Refresh</button></div>
+      <div class="table-wrap"><table><thead><tr><th>Customer</th><th>Plan</th><th>Amount</th><th>Status</th><th>Moyasar invoice</th><th>Created</th><th>Actions</th></tr></thead><tbody>
+        ${(data.payments || []).map((p) => `<tr>
+          <td><strong>${esc(p.display_name || "Unnamed")}</strong><small>${esc(p.email || p.user_id)}</small></td>
+          <td>${badge(p.plan, "blue")}</td>
+          <td><strong>${sar(p.amount_sar)}</strong><small>${esc(p.currency)}</small></td>
+          <td>${badge(p.status, paymentTone(p.status))}</td>
+          <td><code>${esc(shortId(p.provider_invoice_id))}</code><small>${esc(p.provider_payment_id ? `Payment ${shortId(p.provider_payment_id)}` : "No payment ID")}</small></td>
+          <td>${date(p.created_at)}</td>
+          <td><div class="row-actions">
+            ${canManage && p.provider_invoice_id ? `<button class="btn blue" data-payment-sync="${p.id}">Sync</button>` : ""}
+            ${canManage && !["paid", "captured", "paid_manual"].includes(p.status) ? `<button class="btn danger" data-payment-activate="${p.id}">Manual activate</button>` : ""}
+          </div></td>
+        </tr>`).join("")}
+      </tbody></table></div>${(data.payments || []).length ? "" : `<div class="panel-body"><div class="empty">No payment attempts yet.</div></div>`}
+    </section>
+    <section class="panel">
+      <div class="panel-head"><h2>Recent payment events</h2></div>
+      <div class="table-wrap"><table><thead><tr><th>Event</th><th>Provider object</th><th>Status</th><th>Received</th></tr></thead><tbody>
+        ${(data.events || []).map((e) => `<tr><td>${esc(e.event_type)}</td><td><code>${esc(shortId(e.provider_object_id))}</code></td><td>${badge(e.status, paymentTone(e.status))}</td><td>${date(e.created_at)}</td></tr>`).join("")}
+      </tbody></table></div>
     </section>`;
 }
 
@@ -223,6 +281,8 @@ function bind() {
   if (runSearch) runSearch.addEventListener("click", () => refresh("users"));
   document.querySelectorAll("[data-user-status]").forEach((button) => button.addEventListener("click", () => updateUser(button.dataset.userStatus, button.dataset.status)));
   document.querySelectorAll("[data-sub-edit]").forEach((button) => button.addEventListener("click", () => editSubscriber(button.dataset.subEdit)));
+  document.querySelectorAll("[data-payment-sync]").forEach((button) => button.addEventListener("click", () => paymentAction(button.dataset.paymentSync, "sync")));
+  document.querySelectorAll("[data-payment-activate]").forEach((button) => button.addEventListener("click", () => paymentAction(button.dataset.paymentActivate, "activate")));
   const saveAi = document.querySelector("[data-save-ai]");
   if (saveAi) saveAi.addEventListener("click", saveAiSettings);
   const addAdmin = document.querySelector("[data-add-admin]");
@@ -245,6 +305,17 @@ async function editSubscriber(id) {
   const limit = prompt("Monthly AI limit USD", "10") || "10";
   await api(`/api/admin/subscribers/${encodeURIComponent(id)}`, { method: "PATCH", body: { plan, status, ai_monthly_limit_usd: Number(limit) } });
   refresh("subscribers");
+}
+
+async function paymentAction(id, action) {
+  if (action === "activate" && !confirm("Manually activate this subscription without a verified online payment? This action is audited.")) return;
+  try {
+    await api(`/api/admin/payments/${encodeURIComponent(id)}/${action}`, { method: "POST" });
+    await refresh("billing");
+  } catch (error) {
+    state.error = error.message || "Payment action failed.";
+    render();
+  }
 }
 
 async function saveAiSettings() {
@@ -327,6 +398,22 @@ function pageTitle() {
 
 function money(value) {
   return `$${Number(value || 0).toFixed(2)}`;
+}
+
+function sar(value) {
+  return `${Number(value || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} SAR`;
+}
+
+function shortId(value) {
+  const text = String(value || "");
+  return text.length > 18 ? `${text.slice(0, 8)}…${text.slice(-6)}` : text || "—";
+}
+
+function paymentTone(value) {
+  const status = String(value || "");
+  if (["paid", "captured", "verified", "paid_manual"].includes(status)) return "teal";
+  if (["failed", "expired", "canceled", "voided", "refunded"].includes(status)) return "rose";
+  return "gold";
 }
 
 function date(value) {

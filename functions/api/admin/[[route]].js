@@ -1,5 +1,7 @@
 import { adminJson, audit, ensureAdminSchema, requireAdmin, SUPER_ADMIN_EMAIL } from "../_admin.js";
+import { fetchMoyasarInvoice, moyasarStatus } from "../_moyasar.js";
 import { noContent } from "../_state.js";
+import { activatePaidSubscription, ensureSubscriptionSchema, planById, publicPlans } from "../_subscriptions.js";
 
 export async function onRequest(context) {
   if (context.request.method === "OPTIONS") return noContent();
@@ -14,6 +16,10 @@ export async function onRequest(context) {
     if (method === "PATCH" && parts[0] === "users" && parts[1]) return updateUser(context, parts[1]);
     if (method === "GET" && parts[0] === "subscribers") return subscribers(context);
     if (method === "PATCH" && parts[0] === "subscribers" && parts[1]) return updateSubscriber(context, parts[1]);
+    if (method === "GET" && parts[0] === "plans") return plans(context);
+    if (method === "GET" && parts[0] === "payments") return payments(context);
+    if (method === "POST" && parts[0] === "payments" && parts[2] === "sync") return syncPayment(context, parts[1]);
+    if (method === "POST" && parts[0] === "payments" && parts[2] === "activate") return activatePayment(context, parts[1]);
     if (method === "GET" && parts[0] === "ai") return aiManagement(context);
     if (method === "PUT" && parts[0] === "ai" && parts[1] === "settings") return updateAiSettings(context);
     if (method === "GET" && parts[0] === "audit") return auditLogs(context);
@@ -108,6 +114,82 @@ async function subscribers(context) {
     LIMIT 100
   `).all();
   return adminJson({ subscribers: results });
+}
+
+async function plans(context) {
+  const access = await requireAdmin(context);
+  if (access.error) return access.error;
+  await ensureSubscriptionSchema(access.db);
+  const gateway = moyasarStatus(context.env || {}, context.request);
+  const summary = await paymentSummary(access.db);
+  return adminJson({
+    plans: publicPlans(),
+    gateway,
+    summary,
+    setup: {
+      moyasar_dashboard: "https://dashboard.moyasar.com",
+      callback_url: gateway.callback_url,
+      webhook_url: gateway.webhook_url,
+      env_vars: gateway.required_env,
+    },
+  });
+}
+
+async function payments(context) {
+  const access = await requireAdmin(context);
+  if (access.error) return access.error;
+  await ensureSubscriptionSchema(access.db);
+  const { results: rows = [] } = await access.db.prepare(`
+    SELECT p.id, p.user_id, p.plan, p.provider, p.provider_invoice_id, p.provider_payment_id,
+      p.amount_sar, p.currency, p.status, p.checkout_url, p.description, p.created_at, p.updated_at,
+      u.email, u.display_name
+    FROM subscription_payments p
+    LEFT JOIN users u ON u.id = p.user_id
+    ORDER BY p.id DESC
+    LIMIT 120
+  `).all();
+  const { results: events = [] } = await access.db.prepare(`
+    SELECT provider, event_type, provider_object_id, status, created_at
+    FROM payment_events ORDER BY id DESC LIMIT 40
+  `).all();
+  return adminJson({ payments: rows, events, gateway: moyasarStatus(context.env || {}, context.request), summary: await paymentSummary(access.db) });
+}
+
+async function syncPayment(context, id) {
+  const access = await requireAdmin(context, { superAdmin: true });
+  if (access.error) return access.error;
+  await ensureSubscriptionSchema(access.db);
+  const row = await access.db.prepare("SELECT * FROM subscription_payments WHERE id = ?").bind(id).first();
+  if (!row) return adminJson({ error: "Payment was not found.", code: "NOT_FOUND" }, 404);
+  const invoice = await fetchMoyasarInvoice(context.env || {}, row.provider_invoice_id);
+  await access.db.prepare("UPDATE subscription_payments SET status = ?, raw_payload = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
+    .bind(invoice.status || row.status, JSON.stringify(invoice), id).run();
+  if (String(invoice.status) === "paid") {
+    const plan = planById(row.plan);
+    if (plan) await activatePaidSubscription(access.db, row.user_id, plan, invoice);
+  }
+  await audit(context, access, "payment.sync", "payment", id, { invoice_id: row.provider_invoice_id, status: invoice.status });
+  return adminJson({ ok: true, invoice });
+}
+
+async function activatePayment(context, id) {
+  const access = await requireAdmin(context, { superAdmin: true });
+  if (access.error) return access.error;
+  await ensureSubscriptionSchema(access.db);
+  const row = await access.db.prepare("SELECT * FROM subscription_payments WHERE id = ?").bind(id).first();
+  if (!row) return adminJson({ error: "Payment was not found.", code: "NOT_FOUND" }, 404);
+  const plan = planById(row.plan);
+  if (!plan) return adminJson({ error: "Payment plan is no longer available.", code: "BAD_PLAN" }, 409);
+  await access.db.prepare(`
+    INSERT INTO subscriptions(user_id, plan, status, ai_monthly_limit_usd, current_period_end, updated_at)
+    VALUES (?, ?, 'active', ?, ?, CURRENT_TIMESTAMP)
+    ON CONFLICT(user_id) DO UPDATE SET plan=excluded.plan, status='active',
+      ai_monthly_limit_usd=excluded.ai_monthly_limit_usd, current_period_end=excluded.current_period_end,
+      updated_at=CURRENT_TIMESTAMP
+  `).bind(row.user_id, plan.id, plan.ai_monthly_limit_usd, new Date(Date.now() + (plan.billing === "yearly" ? 365 : 30) * 86400000).toISOString().slice(0, 10)).run();
+  await access.db.prepare("UPDATE subscription_payments SET status = 'paid_manual', updated_at = CURRENT_TIMESTAMP WHERE id = ?").bind(id).run();
+  await audit(context, access, "payment.manual_activate", "payment", id, { invoice_id: row.provider_invoice_id, plan: row.plan });
+  return adminJson({ ok: true });
 }
 
 async function updateSubscriber(context, id) {
@@ -253,6 +335,23 @@ async function usageSummary(db) {
     input_tokens: Number(row?.input_tokens || 0),
     output_tokens: Number(row?.output_tokens || 0),
     cost_usd: Number(row?.cost_usd || 0),
+  };
+}
+
+async function paymentSummary(db) {
+  const row = await db.prepare(`
+    SELECT COUNT(*) AS total, COALESCE(SUM(amount_sar), 0) AS gross_sar,
+      SUM(CASE WHEN status IN ('paid','paid_manual','captured') THEN 1 ELSE 0 END) AS paid,
+      SUM(CASE WHEN status IN ('initiated','pending','on_hold') THEN 1 ELSE 0 END) AS pending,
+      SUM(CASE WHEN status IN ('failed','expired','canceled','voided') THEN 1 ELSE 0 END) AS failed
+    FROM subscription_payments
+  `).first();
+  return {
+    total: Number(row?.total || 0),
+    gross_sar: Number(row?.gross_sar || 0),
+    paid: Number(row?.paid || 0),
+    pending: Number(row?.pending || 0),
+    failed: Number(row?.failed || 0),
   };
 }
 

@@ -106,7 +106,7 @@ const TEXT = {
   },
 };
 
-const state = { plans: [], current: null, authenticated: false, user: null, message: "", error: "", locale: loadLocale() };
+const state = { plans: [], current: null, authenticated: false, user: null, message: "", error: "", locale: loadLocale(), busyPlan: "", payment: null };
 
 init();
 
@@ -118,7 +118,27 @@ async function init() {
     state.plans = FALLBACK_PLANS;
     state.error = text("unavailable");
   }
+  await readPaymentReturn();
   render();
+}
+
+async function readPaymentReturn() {
+  const params = new URLSearchParams(location.search);
+  if (params.get("payment") !== "success" || !state.authenticated) return;
+  try {
+    const data = await api("/api/payments/moyasar/status");
+    state.payment = data.payment;
+    if (data.payment?.status === "paid") {
+      state.message = state.locale === "ar" ? "تم الدفع وتفعيل اشتراكك الذهبي بنجاح." : "Payment received. Your Gold subscription is active.";
+      const subscription = await api("/api/subscriptions");
+      state.current = subscription.current;
+    } else {
+      state.message = state.locale === "ar" ? "جارٍ التحقق من الدفع. حدّث الصفحة بعد لحظات." : "Your payment is being verified. Refresh in a moment.";
+    }
+  } catch (error) {
+    state.error = error.message || "Payment status could not be verified.";
+  }
+  history.replaceState({}, "", "/pricing/");
 }
 
 function render() {
@@ -173,8 +193,8 @@ function renderPlan(plan) {
         ${limit(plan.limits.saved_jobs, text("savedJobs"))}
       </div>
       <ul class="features">${planFeatures(plan).map((item) => `<li>${esc(item)}</li>`).join("")}</ul>
-      <button class="btn ${featured ? "gold" : "primary"}" data-select-plan="${esc(plan.id)}" ${current ? "disabled" : ""}>
-        ${current ? esc(text("currentButton")) : plan.id === "free" ? esc(text("startFree")) : esc(text("chooseGold"))}
+      <button class="btn ${featured ? "gold" : "primary"}" data-select-plan="${esc(plan.id)}" ${current || state.busyPlan ? "disabled" : ""}>
+        ${state.busyPlan === plan.id ? (state.locale === "ar" ? "جارٍ فتح الدفع..." : "Opening checkout...") : current ? esc(text("currentButton")) : plan.id === "free" ? esc(text("startFree")) : esc(text("chooseGold"))}
       </button>
     </article>`;
 }
@@ -198,13 +218,20 @@ async function selectPlan(plan) {
     location.href = "/api/auth/google/start?next=%2Fpricing%2F";
     return;
   }
+  state.busyPlan = plan;
+  render();
   try {
     const data = await api("/api/subscriptions", { method: "POST", body: { plan } });
     state.current = data.current;
     state.message = data.message || "Subscription updated.";
+    if (data.next_action === "redirect_to_moyasar" && data.checkout_url) {
+      location.assign(data.checkout_url);
+      return;
+    }
   } catch (error) {
     state.error = error.message || "Could not update subscription.";
   }
+  state.busyPlan = "";
   render();
 }
 

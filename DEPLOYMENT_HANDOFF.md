@@ -160,3 +160,25 @@ Local frozen snapshots live under `versions/jobs{N}/`.
 - D1 account state is normalized into independently revisioned documents. The legacy blob remains available as a rollback source during the migration period.
 - Some recursive resolvers may take a short time to observe the new
   `jobs.wasfai.com` DNS record.
+
+## Moyasar Subscriptions
+
+The pricing page creates hosted Moyasar invoices from the server. Paid access is
+granted only after the backend fetches the invoice from Moyasar and verifies the
+paid status, exact amount, SAR currency, user ID, and plan ID.
+
+Required Cloudflare Pages secrets:
+
+```powershell
+npx wrangler pages secret put MOYASAR_SECRET_KEY --project-name jobs-wasfai
+npx wrangler pages secret put MOYASAR_WEBHOOK_SECRET --project-name jobs-wasfai
+```
+
+Register `https://jobs.wasfai.com/api/payments/moyasar/webhook` as a POST webhook
+in Moyasar Dashboard. Use the same random value for its secret token and
+`MOYASAR_WEBHOOK_SECRET`. Enable paid, failed, refunded, voided, captured, and
+verified payment events.
+
+Gateway readiness, endpoints, transactions, event history, reconciliation, and
+audited manual activation are available under **Admin -> Billing & Moyasar**.
+Secret values are never returned to the browser.
