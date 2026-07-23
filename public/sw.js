@@ -1,4 +1,4 @@
-const CACHE_NAME = "jobs-wasfai-v52-admin";
+const CACHE_NAME = "jobs-wasfai-v53-subscriptions";
 const APP_SHELL = [
   "/",
   "/app",
@@ -6,8 +6,11 @@ const APP_SHELL = [
   "/app.js",
   "/admin/",
   "/super-admin/",
+  "/pricing/",
   "/admin.css",
   "/admin.js",
+  "/pricing.css",
+  "/pricing.js",
   "/offline.html",
   "/manifest.webmanifest",
   "/brand-logo-192.png",

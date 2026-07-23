@@ -239,9 +239,9 @@ async function updateUser(id, status) {
 }
 
 async function editSubscriber(id) {
-  const plan = prompt("Plan: free, pro, business, vip", "pro");
+  const plan = prompt("Plan: free, gold_monthly, gold_annual, pro, business, vip", "gold_monthly");
   if (!plan) return;
-  const status = prompt("Status: trial, active, past_due, paused, cancelled", "active") || "active";
+  const status = prompt("Status: trial, active, pending_payment, past_due, paused, cancelled", "active") || "active";
   const limit = prompt("Monthly AI limit USD", "10") || "10";
   await api(`/api/admin/subscribers/${encodeURIComponent(id)}`, { method: "PATCH", body: { plan, status, ai_monthly_limit_usd: Number(limit) } });
   refresh("subscribers");

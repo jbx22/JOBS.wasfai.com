@@ -114,8 +114,8 @@ async function updateSubscriber(context, id) {
   const access = await requireAdmin(context);
   if (access.error) return access.error;
   const body = await readBody(context);
-  const plan = cleanChoice(body.plan, ["free", "pro", "business", "vip"], "free");
-  const status = cleanChoice(body.status, ["trial", "active", "past_due", "paused", "cancelled"], "trial");
+  const plan = cleanChoice(body.plan, ["free", "gold_monthly", "gold_annual", "pro", "business", "vip"], "free");
+  const status = cleanChoice(body.status, ["trial", "active", "pending_payment", "past_due", "paused", "cancelled"], "trial");
   const limit = Math.max(0, Math.min(1000, Number(body.ai_monthly_limit_usd ?? 5)));
   await access.db.prepare(`
     INSERT INTO subscriptions(user_id, plan, status, ai_monthly_limit_usd, current_period_end, updated_at)
