@@ -184,3 +184,19 @@
 
 - Finalize Google onboarding and QA release gate; extend AI provider timeout after production audit
 
+## jobs47 — 2026-07-23 19:16
+
+- Fix inward-opening account menu, restore header language and theme controls, and refresh verified DeepSeek V4 Flash production key
+
+## jobs48 — 2026-07-23 19:17
+
+- Refresh PWA cache for corrected header controls and account menu
+
+## jobs49 — 2026-07-23 19:20
+
+- Make DeepSeek V4 Flash generation resilient when second-pass review is unavailable
+
+## jobs50 — 2026-07-23 19:22
+
+- Finalize verified DeepSeek V4 Flash production QA and factual-review export gate diagnostics
+

@@ -1,0 +1,50 @@
+const { test, expect } = require("@playwright/test");
+
+const BASE_URL = process.env.JOBS_WASFAI_URL || "https://jobs.wasfai.com";
+const enabled = Boolean(process.env.JOBS_AUTH_STORAGE_STATE);
+
+test("authenticated resume-to-export release gate", async ({ request }) => {
+  test.skip(!enabled, "Set JOBS_AUTH_STORAGE_STATE to the dedicated QA account storage-state file.");
+
+  const stateResponse = await request.get(`${BASE_URL}/api/me/state`);
+  expect(stateResponse.ok()).toBeTruthy();
+  const workspace = await stateResponse.json();
+  expect(workspace.authenticated).toBeTruthy();
+
+  const profile = {
+    ...workspace.state.profile,
+    display_name: "Production QA",
+    target_roles: "Industrial Project Manager, Mechanical Engineer",
+    target_locations: "Saudi Arabia, GCC",
+    resume_skills: "Project management, mechanical engineering, operations, maintenance, CAPEX",
+    resume_languages: "Arabic, English",
+    resume_seniority: "Senior",
+    resume_text: "Production QA resume. Senior industrial project and mechanical engineering professional experienced in operations, maintenance, CAPEX, risk, schedules, and stakeholder management.",
+    resume_filename: "production-qa-resume.txt",
+  };
+  const savedState = { ...workspace.state, profile };
+  delete savedState.__revisions;
+  const saved = await request.put(`${BASE_URL}/api/me/state`, { data: { state: savedState } });
+  expect(saved.ok()).toBeTruthy();
+  const matchResponse = await request.post(`${BASE_URL}/api/jobs/match`, { data: { profile, limit: 5 } });
+  expect(matchResponse.ok()).toBeTruthy();
+  const match = await matchResponse.json();
+  expect(Array.isArray(match.jobs)).toBeTruthy();
+  const job = match.jobs[0] || workspace.state.jobs?.[0];
+  expect(job).toBeTruthy();
+  const generation = await request.post(`${BASE_URL}/api/ghostwriter`, {
+    data: { job, profile, ai_model: "minimax-m3" }, timeout: 60_000,
+  });
+  if (!generation.ok()) throw new Error(`generation failed: ${generation.status()} ${await generation.text()}`);
+  const kit = await generation.json();
+  expect(kit.provider).not.toBe("template");
+  expect(kit.quality_review?.approved).toBeTruthy();
+
+  const pdf = await request.post(`${BASE_URL}/api/export-package`, {
+    data: { format: "pdf", job, profile, kit }, timeout: 45_000,
+  });
+  expect(pdf.ok()).toBeTruthy();
+  expect(pdf.headers()["content-type"]).toContain("application/pdf");
+  const bytes = await pdf.body();
+  expect(bytes.subarray(0, 5).toString()).toBe("%PDF-");
+});

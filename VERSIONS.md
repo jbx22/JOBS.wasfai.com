@@ -4,6 +4,10 @@ Sequential snapshots of the project. Each version is a frozen copy of the source
 
 | Version | Date | Description |
 | --- | --- | --- |
+| jobs50 | 2026-07-23 19:22 | Finalize verified DeepSeek V4 Flash production QA and factual-review export gate diagnostics |
+| jobs49 | 2026-07-23 19:20 | Make DeepSeek V4 Flash generation resilient when second-pass review is unavailable |
+| jobs48 | 2026-07-23 19:17 | Refresh PWA cache for corrected header controls and account menu |
+| jobs47 | 2026-07-23 19:16 | Fix inward-opening account menu, restore header language and theme controls, and refresh verified DeepSeek V4 Flash production key |
 | jobs46 | 2026-07-23 18:57 | Finalize Google onboarding and QA release gate; extend AI provider timeout after production audit |
 | jobs45 | 2026-07-23 18:51 | Add mobile account menu, dedicated Google signup, durable user records, consent, onboarding, and authenticated production QA |
 | jobs44 | 2026-07-23 18:16 | Fix RTL sidebar branding, responsive overflow safeguards, and adaptive PWA orientation |

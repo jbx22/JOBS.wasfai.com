@@ -1,7 +1,7 @@
 {
-  "current": 46,
-  "lastDescription": "Finalize Google onboarding and QA release gate; extend AI provider timeout after production audit",
-  "lastAt": "2026-07-23 18:57",
+  "current": 50,
+  "lastDescription": "Finalize verified DeepSeek V4 Flash production QA and factual-review export gate diagnostics",
+  "lastAt": "2026-07-23 19:22",
   "history": [
     {
       "n": 1,
@@ -232,6 +232,26 @@
       "n": 46,
       "description": "Finalize Google onboarding and QA release gate; extend AI provider timeout after production audit",
       "at": "2026-07-23 18:57"
+    },
+    {
+      "n": 47,
+      "description": "Fix inward-opening account menu, restore header language and theme controls, and refresh verified DeepSeek V4 Flash production key",
+      "at": "2026-07-23 19:16"
+    },
+    {
+      "n": 48,
+      "description": "Refresh PWA cache for corrected header controls and account menu",
+      "at": "2026-07-23 19:17"
+    },
+    {
+      "n": 49,
+      "description": "Make DeepSeek V4 Flash generation resilient when second-pass review is unavailable",
+      "at": "2026-07-23 19:20"
+    },
+    {
+      "n": 50,
+      "description": "Finalize verified DeepSeek V4 Flash production QA and factual-review export gate diagnostics",
+      "at": "2026-07-23 19:22"
     }
   ]
 }
