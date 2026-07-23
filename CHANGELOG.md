@@ -172,3 +172,7 @@
 
 - Production security hardening: same-origin API enforcement, request limits, safer sessions, stronger browser isolation and cache headers, and crawler/security metadata
 
+## jobs44 — 2026-07-23 18:16
+
+- Fix RTL sidebar branding, responsive overflow safeguards, and adaptive PWA orientation
+

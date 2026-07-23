@@ -1,7 +1,7 @@
 {
-  "current": 43,
-  "lastDescription": "Production security hardening: same-origin API enforcement, request limits, safer sessions, stronger browser isolation and cache headers, and crawler/security metadata",
-  "lastAt": "2026-07-14 20:41",
+  "current": 44,
+  "lastDescription": "Fix RTL sidebar branding, responsive overflow safeguards, and adaptive PWA orientation",
+  "lastAt": "2026-07-23 18:16",
   "history": [
     {
       "n": 1,
@@ -217,6 +217,11 @@
       "n": 43,
       "description": "Production security hardening: same-origin API enforcement, request limits, safer sessions, stronger browser isolation and cache headers, and crawler/security metadata",
       "at": "2026-07-14 20:41"
+    },
+    {
+      "n": 44,
+      "description": "Fix RTL sidebar branding, responsive overflow safeguards, and adaptive PWA orientation",
+      "at": "2026-07-23 18:16"
     }
   ]
 }

@@ -29,6 +29,7 @@ test("production PWA manifest and service worker are installable basics", async 
   const manifest = await manifestResponse.json();
   expect(manifest.start_url).toBe("/app");
   expect(manifest.display).toBe("standalone");
+  expect(manifest.orientation).toBe("any");
   expect(manifest.icons.length).toBeGreaterThanOrEqual(2);
 
   const swResponse = await request.get(`${BASE_URL}/sw.js`);
@@ -82,4 +83,23 @@ test("production mobile and desktop screenshots render without console errors", 
   });
 
   expect(errors).toEqual([]);
+});
+
+test("production brand direction and responsive layout stay stable", async ({ page }) => {
+  for (const viewport of [
+    { width: 360, height: 800 },
+    { width: 768, height: 1024 },
+    { width: 1440, height: 900 },
+  ]) {
+    await page.setViewportSize(viewport);
+    await page.goto(`${BASE_URL}/app`, { waitUntil: "networkidle" });
+    await expect(page.locator(".topbar .brand-name")).toHaveText("JOBS.wasfai.com");
+    await expect(page.locator(".topbar .brand-name")).toHaveAttribute("dir", "ltr");
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBeTruthy();
+  }
+
+  const sideBrand = page.locator(".side-nav .brand-name");
+  await expect(sideBrand).toBeVisible();
+  await expect(sideBrand).toHaveText("JOBS.wasfai.com");
+  await expect(sideBrand).toHaveAttribute("dir", "ltr");
 });

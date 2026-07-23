@@ -1296,7 +1296,7 @@ function shell(content, options = {}) {
   const sideNavHtml = `<aside class="side-nav">
     <div class="brand" style="padding: 0 4px;">
       ${brandLogo("logo side-logo")}
-      <div class="titles"><h1>JOBS.wasfai.com</h1><small>مركز البحث عن عمل</small></div>
+      <div class="titles"><h1 class="brand-name" lang="en" dir="ltr">JOBS.wasfai.com</h1><small>مركز البحث عن عمل</small></div>
     </div>
     <h3>القائمة</h3>
     ${NAV.map((item) => {
@@ -1334,7 +1334,7 @@ function renderTopbar(subtitle = "جاهز للبحث والتقديم") {
   return `<header class="topbar">
     <div class="brand">
       ${brandLogo()}
-      <div class="titles"><h1>JOBS.wasfai.com</h1><small>${esc(subtitle)}</small></div>
+      <div class="titles"><h1 class="brand-name" lang="en" dir="ltr">JOBS.wasfai.com</h1><small>${esc(subtitle)}</small></div>
     </div>
     <div class="greet"><span class="hi">مرحباً ${esc(name)}</span><span class="sub">أبدأ يومك</span></div>
     <div class="avatar">${esc(initial)}</div>

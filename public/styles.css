@@ -227,6 +227,17 @@ p {
   color: var(--ink);
 }
 
+.brand .titles {
+  min-width: 0;
+}
+
+.brand .brand-name {
+  direction: ltr;
+  unicode-bidi: isolate;
+  white-space: nowrap;
+  text-align: left;
+}
+
 .brand .titles small {
   display: block;
   color: var(--muted);
@@ -2061,6 +2072,13 @@ p {
     top: 24px;
     max-height: calc(100dvh - 48px);
     overflow: auto;
+    scrollbar-width: thin;
+  }
+  .side-nav .brand {
+    direction: rtl;
+  }
+  .side-nav .brand .titles {
+    flex: 1 1 auto;
   }
   .side-nav h3 {
     font-size: 11px;

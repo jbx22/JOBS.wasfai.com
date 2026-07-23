@@ -4,6 +4,7 @@ Sequential snapshots of the project. Each version is a frozen copy of the source
 
 | Version | Date | Description |
 | --- | --- | --- |
+| jobs44 | 2026-07-23 18:16 | Fix RTL sidebar branding, responsive overflow safeguards, and adaptive PWA orientation |
 | jobs43 | 2026-07-14 20:41 | Production security hardening: same-origin API enforcement, request limits, safer sessions, stronger browser isolation and cache headers, and crawler/security metadata |
 | jobs42 | 2026-07-14 20:18 | Harden live ingestion and KV cache, evidence-based matching, liveness and ATS review gates, offline PWA, incremental domain storage, metrics, and authenticated release QA |
 | jobs41 | 2026-07-14 18:02 | Production Typst Arabic PDF container, protected DeepSeek health proof, normalized revisioned D1 state, and verified live Remotive feed |
