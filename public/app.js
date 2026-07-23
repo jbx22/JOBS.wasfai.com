@@ -1364,6 +1364,7 @@ function renderTopbar(subtitle = "جاهز للبحث والتقديم") {
         <button class="avatar user-menu-trigger" data-user-menu aria-label="القائمة والحساب" aria-expanded="false">${esc(initial)}</button>
         <div class="user-menu" data-user-menu-panel hidden>
           <button data-nav="${state.session?.authenticated ? "/account" : "/login"}">${iconUser()} <span>${state.session?.authenticated ? "الحساب" : "تسجيل الدخول / إنشاء حساب"}</span></button>
+          <button data-open-url="/pricing/">${iconSpark()} <span>الاشتراكات</span></button>
         </div>
       </div>
     </div>
@@ -2695,6 +2696,12 @@ function setupEvents() {
       menuTrigger.setAttribute("aria-expanded", String(opening));
     });
   }
+
+  document.querySelectorAll("[data-open-url]").forEach((item) => {
+    item.addEventListener("click", () => {
+      window.location.href = item.dataset.openUrl;
+    });
+  });
 
   const termsConsent = document.querySelector("[data-terms-consent]");
   const googleLogin = document.querySelector("[data-google-login]");

@@ -28,6 +28,7 @@ button { font: inherit; cursor: pointer; }
 .brand strong { display: block; font-size: 16px; }
 .brand small { display: block; color: var(--muted); font-size: 12px; }
 .top-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+.top-actions .btn { white-space: nowrap; }
 .btn { min-height: 40px; display: inline-flex; align-items: center; justify-content: center; gap: 8px; padding: 0 14px; border-radius: var(--radius); border: 1px solid var(--line); background: var(--surface); color: var(--ink); font-weight: 800; }
 .btn.primary { background: var(--teal); border-color: var(--teal); color: white; }
 .btn.gold { background: var(--gold); border-color: var(--gold); color: white; }
@@ -65,6 +66,10 @@ button { font: inherit; cursor: pointer; }
 .faq article { padding: 14px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
 .faq h3 { margin: 0 0 6px; font-size: 15px; }
 .faq p { margin: 0; color: var(--muted); font-size: 13px; }
+
+[dir="rtl"] body { font-family: "IBM Plex Sans Arabic", "Segoe UI", Tahoma, Arial, sans-serif; }
+[dir="rtl"] .price { direction: rtl; }
+[dir="rtl"] .features li { grid-template-columns: 22px 1fr; }
 
 @media (max-width: 900px) {
   .plans, .faq { grid-template-columns: 1fr; }
