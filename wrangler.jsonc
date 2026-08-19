@@ -6,7 +6,8 @@
   "compatibility_flags": ["nodejs_compat"],
   "vars": {
     "ENVIRONMENT": "production",
-    "BRAND": "JOBS.wasfai.com"
+    "BRAND": "JOBS.wasfai.com",
+    "TYPST_RENDER_URL": "https://jobs-renderer.wasfai.com"
   },
   "d1_databases": [
     {
