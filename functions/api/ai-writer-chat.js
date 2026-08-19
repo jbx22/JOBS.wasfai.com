@@ -38,6 +38,15 @@ const WRITERS = {
     defaultBaseUrl: OPENROUTER_BASE_URL,
     defaultModel: "z-ai/glm-5.2",
   },
+  luna: {
+    provider: "openai",
+    label: "GPT-5.6 Luna",
+    keyNames: ["OPENAI_API_KEY"],
+    baseUrlNames: ["OPENAI_BASE_URL"],
+    modelNames: ["OPENAI_MODEL", "LUNA_MODEL"],
+    defaultBaseUrl: "https://api.openai.com/v1",
+    defaultModel: "gpt-5.6-luna",
+  },
 };
 
 export async function onRequestPost(context) {
@@ -50,7 +59,7 @@ export async function onRequestPost(context) {
     const kit = payload.kit || {};
     const question = String(payload.question || "").trim();
     const history = Array.isArray(payload.history) ? payload.history.slice(-8) : [];
-    const writer = resolveWriter(context.env || {}, payload.ai_model || "deepseek");
+    const writer = resolveWriter(context.env || {}, payload.ai_model || "luna");
 
     if (!question) {
       return json({ error: "Missing interview question.", code: "BAD_REQUEST" }, 400);
@@ -192,8 +201,14 @@ function normalizeProfile(profile) {
 }
 
 function resolveWriter(env, requested) {
-  const key = WRITERS[requested] ? requested : "deepseek";
-  const config = WRITERS[key];
+  const key = WRITERS[requested] ? requested : "luna";
+  const writer = buildWriter(env, key);
+  if (key === "luna" && !writer.apiKey) return buildWriter(env, "deepseek");
+  return writer;
+}
+
+function buildWriter(env, key) {
+  const config = WRITERS[key] || WRITERS.deepseek;
   return {
     provider: config.provider,
     label: config.label,

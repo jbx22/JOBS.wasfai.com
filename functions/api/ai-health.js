@@ -7,11 +7,13 @@ export async function onRequestGet(context) {
   const env = context.env || {};
   const deepseek = Boolean(env.DEEPSEEK_API_KEY || env.AI_API_KEY);
   const openrouter = Boolean(env.OPENROUTER_API_KEY);
+  const openai = Boolean(env.OPENAI_API_KEY);
   return json({
-    ready: deepseek || openrouter,
+    ready: deepseek || openrouter || openai,
     providers: {
       deepseek: deepseek ? "configured" : "missing",
       openrouter: openrouter ? "configured" : "missing",
+      openai: openai ? "configured" : "missing",
     },
     checked_at: new Date().toISOString(),
   });
@@ -25,6 +27,7 @@ export async function onRequestPost(context) {
   if (!expected || !safeEqual(actual, expected)) {
     return json({ error: "Health-check authorization required.", code: "AUTH_REQUIRED" }, 401);
   }
+  if (env.OPENAI_API_KEY) return probeOpenai(env);
   const apiKey = env.DEEPSEEK_API_KEY || env.AI_API_KEY;
   if (!apiKey) return json({ ready: false, provider: "deepseek", error: "missing_key" }, 503);
   const controller = new AbortController();
@@ -45,6 +48,32 @@ export async function onRequestPost(context) {
     return json({ ready: response.ok, provider: "deepseek", status: response.status, checked_at: new Date().toISOString() }, response.ok ? 200 : 502);
   } catch (error) {
     return json({ ready: false, provider: "deepseek", error: error?.name === "AbortError" ? "timeout" : "provider_error" }, 502);
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function probeOpenai(env) {
+  const apiKey = env.OPENAI_API_KEY;
+  if (!apiKey) return json({ ready: false, provider: "openai", error: "missing_key" }, 503);
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 12000);
+  try {
+    const base = String(env.OPENAI_BASE_URL || "https://api.openai.com/v1").replace(/\/+$/, "");
+    const response = await fetch(`${base}/chat/completions`, {
+      method: "POST",
+      signal: controller.signal,
+      headers: { "Authorization": `Bearer ${apiKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: env.OPENAI_MODEL || env.LUNA_MODEL || "gpt-5.6-luna",
+        max_completion_tokens: 8,
+        temperature: 0,
+        messages: [{ role: "user", content: "Reply with READY only." }],
+      }),
+    });
+    return json({ ready: response.ok, provider: "openai", model: "gpt-5.6-luna", status: response.status, checked_at: new Date().toISOString() }, response.ok ? 200 : 502);
+  } catch (error) {
+    return json({ ready: false, provider: "openai", error: error?.name === "AbortError" ? "timeout" : "provider_error" }, 502);
   } finally {
     clearTimeout(timeout);
   }

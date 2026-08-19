@@ -144,7 +144,7 @@ export function buildInitialState(user = {}) {
     approvedMasterResume: false,
     masterResume: { ar: "", en: "", approved_at: "" },
     tailoringBriefs: {},
-    aiWriterModel: "deepseek",
+    aiWriterModel: "luna",
   };
 }
 

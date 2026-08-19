@@ -223,6 +223,7 @@ async function aiManagement(context) {
   const { results: settings = [] } = await access.db.prepare("SELECT key, value, updated_at FROM ai_settings ORDER BY key").all();
   return adminJson({
     providers: [
+      { id: "luna", label: "GPT-5.6 Luna", configured: Boolean(env.OPENAI_API_KEY), model: env.OPENAI_MODEL || env.LUNA_MODEL || "gpt-5.6-luna" },
       { id: "deepseek", label: "DeepSeek V4 Flash", configured: Boolean(env.DEEPSEEK_API_KEY || env.AI_API_KEY), model: env.DEEPSEEK_MODEL || env.AI_MODEL || "deepseek-v4-flash" },
       { id: "openrouter", label: "OpenRouter", configured: Boolean(env.OPENROUTER_API_KEY), model: env.MINIMAX_MODEL || env.OPENROUTER_MINIMAX_MODEL || "minimax/minimax-m3" },
     ],

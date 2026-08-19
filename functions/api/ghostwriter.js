@@ -44,6 +44,15 @@ const AI_WRITER_MODELS = {
     defaultBaseUrl: OPENROUTER_BASE_URL,
     defaultModel: "z-ai/glm-5.2",
   },
+  luna: {
+    provider: "openai",
+    label: "GPT-5.6 Luna",
+    keyNames: ["OPENAI_API_KEY"],
+    baseUrlNames: ["OPENAI_BASE_URL"],
+    modelNames: ["OPENAI_MODEL", "LUNA_MODEL"],
+    defaultBaseUrl: "https://api.openai.com/v1",
+    defaultModel: "gpt-5.6-luna",
+  },
 };
 
 export async function onRequestPost(context) {
@@ -53,7 +62,7 @@ export async function onRequestPost(context) {
     const payload = await context.request.json();
     const job = normalizeJob(payload.job || {});
     const profile = normalizeProfile(payload.profile || {});
-    const writer = resolveAiWriter(context.env || {}, payload.ai_model || payload.writer_model || "deepseek");
+    const writer = resolveAiWriter(context.env || {}, payload.ai_model || payload.writer_model || "luna");
 
     if (!job.id || !job.title || !job.employer) {
       return json({ error: "Missing job id, title, or employer.", code: "BAD_REQUEST" }, 400);
@@ -247,8 +256,14 @@ function openRouterHeaders(writer) {
 }
 
 function resolveAiWriter(env, requested) {
-  const key = AI_WRITER_MODELS[requested] ? requested : "deepseek";
-  const config = AI_WRITER_MODELS[key];
+  const key = AI_WRITER_MODELS[requested] ? requested : "luna";
+  const writer = buildWriter(env, key);
+  if (key === "luna" && !writer.apiKey) return buildWriter(env, "deepseek");
+  return writer;
+}
+
+function buildWriter(env, key) {
+  const config = AI_WRITER_MODELS[key] || AI_WRITER_MODELS.deepseek;
   return {
     id: key,
     provider: config.provider,

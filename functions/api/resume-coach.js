@@ -9,6 +9,8 @@
 
 const DEEPSEEK_BASE_URL = "https://api.deepseek.com/v1";
 const DEEPSEEK_MODEL = "deepseek-v4-flash";
+const OPENAI_BASE_URL = "https://api.openai.com/v1";
+const OPENAI_MODEL = "gpt-5.6-luna";
 import { recordAiUsage } from "./_ai_usage.js";
 import { requireProtectedRequest } from "./_security.js";
 
@@ -23,7 +25,7 @@ export async function onRequestPost(context) {
       return json({ error: "Add the original resume text before improvement.", code: "RESUME_REQUIRED" }, 400);
     }
 
-    const ai = await improveWithDeepSeek(context, access.user, context.env || {}, profile);
+    const ai = await improveWithAi(context, access.user, context.env || {}, profile);
     if (!ai) return json({ error: "AI resume coaching is temporarily unavailable.", code: "AI_UNAVAILABLE" }, 503);
     return json(ai);
   } catch (error) {
@@ -42,12 +44,20 @@ export async function onRequestOptions() {
   return new Response(null, { status: 204, headers: corsHeaders() });
 }
 
-async function improveWithDeepSeek(context, user, env, profile) {
-  const apiKey = env.DEEPSEEK_API_KEY || env.AI_API_KEY;
+async function improveWithAi(context, user, env, profile) {
+  const openaiKey = env.OPENAI_API_KEY;
+  const apiKey = openaiKey || env.DEEPSEEK_API_KEY || env.AI_API_KEY;
   if (!apiKey) return null;
 
-  const baseUrl = String(env.DEEPSEEK_BASE_URL || env.AI_BASE_URL || DEEPSEEK_BASE_URL).replace(/\/+$/, "");
-  const model = env.DEEPSEEK_MODEL || env.AI_MODEL || DEEPSEEK_MODEL;
+  const provider = openaiKey ? "openai" : "deepseek";
+  const baseUrl = String(
+    openaiKey
+      ? env.OPENAI_BASE_URL || OPENAI_BASE_URL
+      : env.DEEPSEEK_BASE_URL || env.AI_BASE_URL || DEEPSEEK_BASE_URL,
+  ).replace(/\/+$/, "");
+  const model = openaiKey
+    ? env.OPENAI_MODEL || env.LUNA_MODEL || OPENAI_MODEL
+    : env.DEEPSEEK_MODEL || env.AI_MODEL || DEEPSEEK_MODEL;
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 12000);
 
@@ -76,12 +86,12 @@ async function improveWithDeepSeek(context, user, env, profile) {
 
     if (!response.ok) return null;
     const data = await response.json();
-    await recordAiUsage(context, user, { route: "resume-coach", provider: "deepseek", model, usage: data.usage, status: "ok" });
+    await recordAiUsage(context, user, { route: "resume-coach", provider, model, usage: data.usage, status: "ok" });
     const text = data?.choices?.[0]?.message?.content;
     if (!text) return null;
 
     return {
-      provider: "deepseek",
+      provider,
       model,
       ...validateCoach(parseAiJson(text), profile),
     };
