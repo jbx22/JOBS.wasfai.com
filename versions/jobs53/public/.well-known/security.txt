@@ -1,0 +1,4 @@
+Canonical: https://jobs.wasfai.com/.well-known/security.txt
+Preferred-Languages: ar, en
+Policy: https://jobs.wasfai.com/privacy
+Expires: 2027-07-14T00:00:00.000Z

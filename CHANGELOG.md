@@ -208,3 +208,7 @@
 
 - Add secure Moyasar checkout, subscription activation, payment webhooks, and Billing & Moyasar admin console
 
+## jobs53 — 2026-09-11 22:43
+
+- Add server-only SAdmin service credential path to the admin API for reads and audited writes
+
