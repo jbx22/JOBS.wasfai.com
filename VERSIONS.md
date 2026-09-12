@@ -4,6 +4,7 @@ Sequential snapshots of the project. Each version is a frozen copy of the source
 
 | Version | Date | Description |
 | --- | --- | --- |
+| jobs55 | 2026-09-12 23:41 | Portability fixes for the PostgreSQL backend: explicit GROUP BY for the admin subscriber roll-up and a gateway statement allowlist (DML + idempotent CREATE TABLE/INDEX only) |
 | jobs54 | 2026-09-12 23:31 | Migrate production relational data and server API storage from Cloudflare D1 (JOBS_DB) to the dedicated VPS PostgreSQL database via a token-authenticated server-side gateway; R2 RESUME_FILES retained |
 | jobs53 | 2026-09-11 22:43 | Add server-only SAdmin service credential path to the admin API for reads and audited writes |
 | jobs52 | 2026-07-23 21:27 | Add secure Moyasar checkout, subscription activation, payment webhooks, and Billing & Moyasar admin console |

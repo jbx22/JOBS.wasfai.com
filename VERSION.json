@@ -1,7 +1,7 @@
 {
-  "current": 54,
-  "lastDescription": "Migrate production relational data and server API storage from Cloudflare D1 (JOBS_DB) to the dedicated VPS PostgreSQL database via a token-authenticated server-side gateway; R2 RESUME_FILES retained",
-  "lastAt": "2026-09-12 23:31",
+  "current": 55,
+  "lastDescription": "Portability fixes for the PostgreSQL backend: explicit GROUP BY for the admin subscriber roll-up and a gateway statement allowlist (DML + idempotent CREATE TABLE/INDEX only)",
+  "lastAt": "2026-09-12 23:41",
   "history": [
     {
       "n": 1,
@@ -272,6 +272,11 @@
       "n": 54,
       "description": "Migrate production relational data and server API storage from Cloudflare D1 (JOBS_DB) to the dedicated VPS PostgreSQL database via a token-authenticated server-side gateway; R2 RESUME_FILES retained",
       "at": "2026-09-12 23:31"
+    },
+    {
+      "n": 55,
+      "description": "Portability fixes for the PostgreSQL backend: explicit GROUP BY for the admin subscriber roll-up and a gateway statement allowlist (DML + idempotent CREATE TABLE/INDEX only)",
+      "at": "2026-09-12 23:41"
     }
   ]
 }

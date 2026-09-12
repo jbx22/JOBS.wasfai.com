@@ -216,3 +216,7 @@
 
 - Migrate production relational data and server API storage from Cloudflare D1 (JOBS_DB) to the dedicated VPS PostgreSQL database via a token-authenticated server-side gateway; R2 RESUME_FILES retained
 
+## jobs55 — 2026-09-12 23:41
+
+- Portability fixes for the PostgreSQL backend: explicit GROUP BY for the admin subscriber roll-up and a gateway statement allowlist (DML + idempotent CREATE TABLE/INDEX only)
+

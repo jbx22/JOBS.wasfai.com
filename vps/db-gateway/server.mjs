@@ -16,7 +16,7 @@
  */
 import http from "node:http";
 import pg from "pg";
-import { translateSql, isSingleStatement, countPlaceholders } from "./sql.mjs";
+import { translateSql, isSingleStatement, countPlaceholders, maxPlaceholderIndex, assertAllowedStatement } from "./sql.mjs";
 
 const PORT = Number(process.env.PORT || 8080);
 const TOKEN = process.env.GATEWAY_TOKEN || "";
@@ -93,6 +93,7 @@ async function execute(client, statement) {
   if (!isSingleStatement(raw)) {
     throw Object.assign(new Error("multi-statement payloads are not allowed"), { statusCode: 400 });
   }
+  assertAllowedStatement(raw);
   const sql = translateSql(raw);
   const params = Array.isArray(statement.params) ? statement.params : [];
   const expected = countPlaceholders(raw);
@@ -100,6 +101,15 @@ async function execute(client, statement) {
     throw Object.assign(
       new Error(`parameter count mismatch: ${params.length} bound, ${expected} placeholders`),
       { statusCode: 400 },
+    );
+  }
+  // Safety net: after translation the highest $n must equal the bound parameter
+  // count, otherwise the driver would mis-bind values silently.
+  const highest = maxPlaceholderIndex(sql);
+  if (highest !== params.length) {
+    throw Object.assign(
+      new Error(`translation invariant violated: highest $${highest} vs ${params.length} bound values`),
+      { statusCode: 500 },
     );
   }
   const mode = statement.mode === "run" || statement.mode === "first" ? statement.mode : "all";
