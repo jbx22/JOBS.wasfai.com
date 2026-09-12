@@ -42,7 +42,7 @@ echo "[$STAMP] dump size: $(du -h "$DUMP" | cut -f1)"
 if [ ! -f "$PASSPHRASE_FILE" ] || [ ! -f /root/.aws/credentials ]; then
   fail "R2/encryption not configured (missing $PASSPHRASE_FILE or /root/.aws/credentials)"
 fi
-KEY="$(basename "${DUMP%.gz}").gpg"
+KEY="$(basename "$DUMP").gpg"
 if ! gpg --batch --yes --pinentry-mode loopback --passphrase-file "$PASSPHRASE_FILE" \
   --symmetric --cipher-algo AES256 --output "$DB_BACKUP_DIR/$KEY" "$DUMP" 2>/dev/null; then
   fail "gpg encryption failed"
@@ -64,7 +64,7 @@ aws s3 ls "s3://${BUCKET}/${PREFIX}/" --endpoint-url "$ENDPOINT" 2>/dev/null | w
   obj_date="${line%% *}"
   obj_name="${line##* }"
   case "$obj_name" in
-    pg_dump-${DB}-*.sql.gz.gpg)
+    pg_dump-${DB}-*.sql.gz.gpg|pg_dump-${DB}-*.sql.gpg)
       if [ "$obj_date" \< "$CUTOFF" ]; then
         aws s3 rm "s3://${BUCKET}/${PREFIX}/${obj_name}" --endpoint-url "$ENDPOINT" >>/tmp/jobs-r2.err 2>&1 \
           && echo "[$STAMP] pruned R2 object older than ${RETENTION_R2_DAYS}d: $obj_name"

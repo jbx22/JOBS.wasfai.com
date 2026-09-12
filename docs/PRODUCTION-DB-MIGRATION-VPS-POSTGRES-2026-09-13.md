@@ -127,6 +127,10 @@ Daily job installed: `/etc/crontab` → `/usr/local/bin/jobs-db-backup.sh`
 **daily 02:45**, `pg_dump` → gzip → AES-256 (gpg) → R2 `s3://vps-backups/jobs-db-backups/`
 (account `20af8653055a0b9e99aa4a30e346f3d4`), 14-day on-host and 30-day R2
 retention, failure visibility via non-zero exit + `/var/log/jobs-backup.log`.
+Independent review corrected the generated target filename to `.sql.gz.gpg` and
+made retention recognize both that canonical suffix and the earlier `.sql.gpg`
+artifacts. A fresh canonical object was downloaded, decrypted, restored into an
+isolated database, and matched the live 20-table / 129-row state.
 The pre-existing SKNAI cron line was preserved unchanged.
 
 | Artifact (off-site) | Restore test | Result |
@@ -206,7 +210,7 @@ showed **no change** from the loaded snapshot (128 rows, zero count differences)
 
 **Soak period:** observe until **2026-09-20**. During the soak, watch
 `/var/log/jobs-backup.log`, the appearance of new
-`pg_dump-jobs-*.sql.gpg` objects in R2, and application error rates. D1 (and the
+`pg_dump-jobs-*.sql.gz.gpg` objects in R2, and application error rates. D1 (and the
 staging/older artifacts) must only be retired after an explicit owner decision —
 that is a separate step from migration completion.
 
