@@ -4,6 +4,7 @@ Sequential snapshots of the project. Each version is a frozen copy of the source
 
 | Version | Date | Description |
 | --- | --- | --- |
+| jobs54 | 2026-09-12 23:31 | Migrate production relational data and server API storage from Cloudflare D1 (JOBS_DB) to the dedicated VPS PostgreSQL database via a token-authenticated server-side gateway; R2 RESUME_FILES retained |
 | jobs53 | 2026-09-11 22:43 | Add server-only SAdmin service credential path to the admin API for reads and audited writes |
 | jobs52 | 2026-07-23 21:27 | Add secure Moyasar checkout, subscription activation, payment webhooks, and Billing & Moyasar admin console |
 | jobs51 | 2026-07-23 19:38 | Add private encrypted D1 and R2 resume file storage with validated upload, download, replacement, and deletion |

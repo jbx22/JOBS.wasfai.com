@@ -1,0 +1,42 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "jobs-wasfai-ingestion",
+  "main": "src/index.js",
+  "compatibility_date": "2026-07-13",
+  "compatibility_flags": ["nodejs_compat"],
+  "triggers": {
+    "crons": ["*/30 * * * *"]
+  },
+  "vars": {
+    "ENVIRONMENT": "production",
+    "BRAND": "JOBS.wasfai.com"
+  },
+  "d1_databases": [
+    {
+      "binding": "JOBS_DB",
+      "database_name": "jobs-wasfai-db",
+      "database_id": "8471b0c2-e32b-4bc0-84fe-d2b6250a374e"
+    }
+  ],
+  "kv_namespaces": [
+    {
+      "binding": "JOBS_CACHE",
+      "id": "65fbdd4cb9574dda88302d05e0139a04"
+    }
+  ],
+  "queues": {
+    "producers": [
+      {
+        "binding": "JOBS_SCAN_QUEUE",
+        "queue": "jobs-wasfai-scan-queue"
+      }
+    ],
+    "consumers": [
+      {
+        "queue": "jobs-wasfai-scan-queue",
+        "max_batch_size": 5,
+        "max_batch_timeout": 30
+      }
+    ]
+  }
+}

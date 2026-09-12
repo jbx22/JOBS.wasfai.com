@@ -1,0 +1,22 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "jobs-wasfai-pdf-renderer",
+  "main": "src/index.js",
+  "compatibility_date": "2026-07-14",
+  "containers": [
+    {
+      "class_name": "TypstContainer",
+      "image": "../../Dockerfile.typst",
+      "instance_type": "basic",
+      "max_instances": 2
+    }
+  ],
+  "durable_objects": {
+    "bindings": [
+      { "name": "TYPST_CONTAINER", "class_name": "TypstContainer" }
+    ]
+  },
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["TypstContainer"] }
+  ]
+}
