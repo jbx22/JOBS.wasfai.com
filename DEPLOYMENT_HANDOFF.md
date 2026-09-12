@@ -182,3 +182,58 @@ verified payment events.
 Gateway readiness, endpoints, transactions, event history, reconciliation, and
 audited manual activation are available under **Admin -> Billing & Moyasar**.
 Secret values are never returned to the browser.
+
+---
+
+## Relational store: D1 → VPS PostgreSQL (2026-09-13, jobs55)
+
+The relational store and server-side API storage moved from Cloudflare D1
+(`jobs-wasfai-db`, binding `JOBS_DB`) to the dedicated VPS PostgreSQL database
+`jobs` in the `jobs-postgres` container. Cloudflare still serves DNS/WAF, the
+Pages frontend and the Pages Functions API layer; **R2 `RESUME_FILES`
+(`jobs-wasfai-resumes`) still holds every résumé/file blob** and is still bound
+to the edge.
+
+```
+browser → Cloudflare (WAF/CSP) → Pages frontend + Functions /api/*
+                                     │ bearer-token HTTPS
+                                     ▼
+                        jobs-db-gateway (VPS container)
+                                     │ pg, least-privilege role `jobs_app`
+                                     ▼
+                        PostgreSQL `jobs` (jobs-postgres, no public port)
+ingestion Worker (`*/30`) ───────────┘
+```
+
+- `functions/api/_db.js` and `workers/ingestion/src/_db.js` expose the D1 call
+  surface (`prepare/bind/first/all/run/batch`) over the gateway, so handler code
+  is unchanged apart from the binding lookup. The D1 binding itself is **kept**.
+- Required bindings: `JOBS_DB_GATEWAY_URL` (var) and `JOBS_DB_GATEWAY_TOKEN`
+  (secret) on the Pages project and on the ingestion Worker. Absent bindings fail
+  closed (`STORAGE_NOT_CONFIGURED`).
+- Gateway source: `vps/db-gateway/` (image `jobs-db-gateway:1.0.0`, container
+  `jobs-db-gateway`, host `jobs-db.169.58.202.29.sslip.io`). It only accepts a
+  single parameterised statement per call, refuses destructive verbs, and never
+  logs SQL or values.
+- Backups: `jobs-db-backup.sh` runs daily at 02:45 from `/etc/crontab` →
+  `s3://vps-backups/jobs-db-backups/` (AES-256), 14-day local / 30-day R2
+  retention, failures in `/var/log/jobs-backup.log`.
+- Migration tooling: `tools/migration/` (converter, adapter codemod,
+  reconciliation) — no secrets, no dumps.
+
+Full record, invariants, restore proofs and exact rollback steps:
+`docs/PRODUCTION-DB-MIGRATION-VPS-POSTGRES-2026-09-13.md`.
+Rollback anchors: Pages `392dfcc8-7e22-4ee6-825b-65fe070e7453` (fabae1e0),
+ingestion Worker `f470d4d5-a629-4631-b428-0fbc359dcf16`. Soak until 2026-09-20;
+D1 stays frozen and must not be retired without an explicit owner decision.
+
+### Deploying this project now
+
+```bash
+npm run check:all
+npx wrangler pages deploy public --project-name jobs-wasfai --branch main
+npx wrangler deploy --config workers/ingestion/wrangler.jsonc
+```
+
+The two gateway bindings must exist on both the Pages project and the ingestion
+Worker, otherwise account storage reports `STORAGE_NOT_CONFIGURED`.
