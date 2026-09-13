@@ -7,7 +7,8 @@
   "vars": {
     "ENVIRONMENT": "production",
     "BRAND": "JOBS.wasfai.com",
-    "TYPST_RENDER_URL": "https://jobs-renderer.wasfai.com"
+    "TYPST_RENDER_URL": "https://jobs-renderer.wasfai.com",
+    "JOBS_DB_GATEWAY_URL": "https://jobs-db.wasfai.com"
   },
   "d1_databases": [
     {

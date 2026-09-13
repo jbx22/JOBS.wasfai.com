@@ -10,7 +10,7 @@
   "vars": {
     "ENVIRONMENT": "production",
     "BRAND": "JOBS.wasfai.com",
-    "JOBS_DB_GATEWAY_URL": "https://jobs-db.169.58.202.29.sslip.io"
+    "JOBS_DB_GATEWAY_URL": "https://jobs-db.wasfai.com"
   },
   "d1_databases": [
     {

@@ -212,9 +212,11 @@ ingestion Worker (`*/30`) ───────────┘
   (secret) on the Pages project and on the ingestion Worker. Absent bindings fail
   closed (`STORAGE_NOT_CONFIGURED`).
 - Gateway source: `vps/db-gateway/` (image `jobs-db-gateway:1.0.0`, container
-  `jobs-db-gateway`, host `jobs-db.169.58.202.29.sslip.io`). It only accepts a
-  single parameterised statement per call, refuses destructive verbs, and never
-  logs SQL or values.
+  `jobs-db-gateway`, public host **`jobs-db.wasfai.com`** behind Cloudflare since
+  2026-09-13). It only accepts a single parameterised statement per call, refuses
+  destructive verbs, and never logs SQL or values. Origin ingress is restricted to
+  Cloudflare proxy networks; the old `jobs-db.169.58.202.29.sslip.io` route is
+  disabled and must not be re-enabled as a live bypass.
 - Backups: `jobs-db-backup.sh` runs daily at 02:45 from `/etc/crontab` →
   `s3://vps-backups/jobs-db-backups/` (AES-256), 14-day local / 30-day R2
   retention, failures in `/var/log/jobs-backup.log`.
@@ -227,6 +229,10 @@ Rollback anchors: Pages `392dfcc8-7e22-4ee6-825b-65fe070e7453` (fabae1e0),
 ingestion Worker `f470d4d5-a629-4631-b428-0fbc359dcf16`. Soak until 2026-09-20;
 D1 stays frozen and must not be retired without an explicit owner decision.
 
+Gateway hostname hardening (Cloudflare DNS record, Traefik route, Cloudflare-only
+origin ingress, old-route disablement, deploy gotcha) is recorded in
+`docs/GATEWAY-HOSTNAME-HARDENING-2026-09-13.md`.
+
 ### Deploying this project now
 
 ```bash
@@ -237,3 +243,8 @@ npx wrangler deploy --config workers/ingestion/wrangler.jsonc
 
 The two gateway bindings must exist on both the Pages project and the ingestion
 Worker, otherwise account storage reports `STORAGE_NOT_CONFIGURED`.
+
+`JOBS_DB_GATEWAY_URL` is declared in `wrangler.jsonc` `vars` on purpose: a plain
+Pages env var that is **not** declared there is pruned by the next
+`wrangler pages deploy`. `JOBS_DB_GATEWAY_TOKEN` stays a dashboard secret and is
+preserved by deploys.
