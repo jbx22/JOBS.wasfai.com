@@ -220,3 +220,7 @@
 
 - Portability fixes for the PostgreSQL backend: explicit GROUP BY for the admin subscriber roll-up and a gateway statement allowlist (DML + idempotent CREATE TABLE/INDEX only)
 
+
+## jobs58 — 2026-09-14 00:25
+
+- Add a first-class public release marker: `functions/api/version.js` publishes the `JOBS_RELEASE` constant ("jobs58") at `GET /api/version`, with an `x-jobs-release` response header, no-store caching and a 405 for mutating methods. Unauthenticated and secret-free; nothing beyond the version string is disclosed. The service worker `CACHE_NAME` is no longer the only deployed release identity. Pinned by `test/release-marker.test.mjs`, which fails if the constant drifts from `VERSION.json`.

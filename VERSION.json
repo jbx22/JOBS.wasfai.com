@@ -1,7 +1,7 @@
 {
-  "current": 55,
-  "lastDescription": "Portability fixes for the PostgreSQL backend: explicit GROUP BY for the admin subscriber roll-up and a gateway statement allowlist (DML + idempotent CREATE TABLE/INDEX only)",
-  "lastAt": "2026-09-12 23:41",
+  "current": 58,
+  "lastDescription": "Add a first-class public release marker: functions/api/version.js publishes the JOBS_RELEASE constant (jobs58) at GET /api/version with an x-jobs-release header, replacing reliance on the service worker CACHE_NAME as the only deployed release identity",
+  "lastAt": "2026-09-14 00:25",
   "history": [
     {
       "n": 1,
@@ -277,6 +277,11 @@
       "n": 55,
       "description": "Portability fixes for the PostgreSQL backend: explicit GROUP BY for the admin subscriber roll-up and a gateway statement allowlist (DML + idempotent CREATE TABLE/INDEX only)",
       "at": "2026-09-12 23:41"
+    },
+    {
+      "n": 58,
+      "description": "Add a first-class public release marker: functions/api/version.js publishes the JOBS_RELEASE constant (jobs58) at GET /api/version with an x-jobs-release header, replacing reliance on the service worker CACHE_NAME as the only deployed release identity",
+      "at": "2026-09-14 00:25"
     }
   ]
 }
