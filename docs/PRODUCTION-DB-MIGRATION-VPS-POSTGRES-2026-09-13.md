@@ -1,6 +1,8 @@
 # Production database migration — Cloudflare D1 → VPS PostgreSQL (jobs.wasfai.com)
 
 **Date:** 2026-09-13 (Asia/Riyadh)
+**Final post-cutover gate (2026-09-13, owner-directed early close):** PASSED — full anchor reconciliation, fresh off-site backup + restore proof, and live smoke. D1 is classified **ROLLBACK-ONLY** (retained frozen; no destructive change). See [POST-CUTOVER-FINAL-GATE-2026-09-13.md](POST-CUTOVER-FINAL-GATE-2026-09-13.md).
+
 **Scope:** migrate the production relational store and server API storage of
 `jobs.wasfai.com` from Cloudflare D1 (`jobs-wasfai-db`, binding `JOBS_DB`) to the
 dedicated VPS PostgreSQL database `jobs` in the `jobs-postgres` container.
