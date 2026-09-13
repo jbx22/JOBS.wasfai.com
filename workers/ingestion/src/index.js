@@ -565,11 +565,20 @@ async function archiveStaleJobs(env, sourceId, now) {
   ).bind(now).run();
 }
 
+/**
+ * Metric upsert. The `value` reference in the `DO UPDATE SET` clause MUST be
+ * table-qualified: PostgreSQL resolves a bare `value` against both the target
+ * row and the special `excluded` row and rejects the statement with
+ * `column reference "value" is ambiguous`. SQLite/D1 accept either form, so
+ * qualifying keeps the preserved D1 rollback path valid while making the
+ * statement portable to the VPS PostgreSQL store. See
+ * test/upsert-compat.test.mjs.
+ */
+export const METRIC_UPSERT_SQL = `INSERT INTO ingestion_metrics(metric_key, bucket, value, updated_at) VALUES (?1, ?2, ?3, CURRENT_TIMESTAMP)
+     ON CONFLICT(metric_key, bucket) DO UPDATE SET value=ingestion_metrics.value+excluded.value, updated_at=CURRENT_TIMESTAMP`;
+
 async function incrementMetric(env, key, bucket = "global", amount = 1) {
-  await getJobDb(env).prepare(
-    `INSERT INTO ingestion_metrics(metric_key, bucket, value, updated_at) VALUES (?1, ?2, ?3, CURRENT_TIMESTAMP)
-     ON CONFLICT(metric_key, bucket) DO UPDATE SET value=value+excluded.value, updated_at=CURRENT_TIMESTAMP`,
-  ).bind(key, bucket, Number(amount || 1)).run();
+  await getJobDb(env).prepare(METRIC_UPSERT_SQL).bind(key, bucket, Number(amount || 1)).run();
 }
 
 function classifyJob(job) {
