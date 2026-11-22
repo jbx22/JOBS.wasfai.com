@@ -1,7 +1,7 @@
 {
-  "current": 63,
-  "lastDescription": "Log missing Google OAuth settings without exposing credential values",
-  "lastAt": "2026-11-22 19:47",
+  "current": 64,
+  "lastDescription": "Recover cleanly from Google OAuth callback failures",
+  "lastAt": "2026-11-22 20:02",
   "history": [
     {
       "n": 1,
@@ -307,6 +307,11 @@
       "n": 63,
       "description": "Log missing Google OAuth settings without exposing credential values",
       "at": "2026-11-22 19:47"
+    },
+    {
+      "n": 64,
+      "description": "Recover cleanly from Google OAuth callback failures",
+      "at": "2026-11-22 20:02"
     }
   ]
 }

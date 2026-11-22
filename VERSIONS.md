@@ -4,6 +4,7 @@ Sequential snapshots of the project. Each version is a frozen copy of the source
 
 | Version | Date | Description |
 | --- | --- | --- |
+| jobs64 | 2026-11-22 20:02 | Recover cleanly from Google OAuth callback failures |
 | jobs63 | 2026-11-22 19:47 | Log missing Google OAuth settings without exposing credential values |
 | jobs62 | 2026-11-22 19:20 | Refresh browser pricing assets on deployment |
 | jobs61 | 2026-11-22 18:57 | Prepare production billing: verify exact orders, preserve active plans, harden callback and Google provider requests. |

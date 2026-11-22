@@ -129,6 +129,17 @@ test("provider outages produce a recoverable error and no session", async (t) =>
   assert.equal(hasIssuedSession(response), false);
 });
 
+test("Google callback failures return browser users to login and retain a local destination", async (t) => {
+  gatewayFixture(t, { providerError: true });
+  const ctx = callbackContext(testEnv, "; jobs_oauth_return=%2Fpricing%2F");
+  ctx.request = new Request(ctx.request, { headers: { ...Object.fromEntries(ctx.request.headers), Accept: "text/html" } });
+  const response = await callback(ctx);
+  assert.equal(response.status, 303);
+  assert.equal(response.headers.get("Location"), "/login?oauth_retry=1&next=%2Fpricing%2F");
+  assert.equal(hasIssuedSession(response), false);
+  assert.ok(response.headers.getSetCookie().some((c) => c.startsWith("jobs_oauth_state=") && c.includes("Max-Age=0")));
+});
+
 test("old signed sessions use current database identity and lose access on suspension", async (t) => {
   const { db, addUser } = gatewayFixture(t);
   addUser();
