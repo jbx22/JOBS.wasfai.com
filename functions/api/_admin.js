@@ -1,5 +1,4 @@
-import { authConfig, readSession } from "./auth/_auth.js";
-import { json } from "./_state.js";
+import { getAuthenticatedUser, json } from "./_state.js";
 import { getJobDb } from "./_db.js";
 
 export const SUPER_ADMIN_EMAIL = "jabosaag@gmail.com";
@@ -118,8 +117,7 @@ export async function requireAdmin(context, options = {}) {
       },
     };
   }
-  const config = authConfig(context.env || {}, context.request);
-  const session = await readSession(context.request, config.cookieSecret);
+  const session = await getAuthenticatedUser(context);
   if (!session) return { error: json({ error: "Sign in with Google to access admin.", code: "AUTH_REQUIRED" }, 401) };
   await ensureAdminSchema(db);
   const email = String(session.email || "").trim().toLowerCase();
