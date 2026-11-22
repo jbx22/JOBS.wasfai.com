@@ -139,6 +139,8 @@ test(
         requests bigint NOT NULL DEFAULT 0,
         PRIMARY KEY (user_id, route, window_start))`);
 
+      // Keep table creation outside the rollback probe; a fresh CI database has no pre-existing tables.
+      await client.query("SAVEPOINT upsert_probe");
       const metricSql = translateSql(METRIC_UPSERT_SQL);
       await client.query(metricSql, ["scan_success", bucket, 1]);
       await client.query(metricSql, ["scan_success", bucket, 1]);
@@ -155,11 +157,12 @@ test(
       assert.equal(rate.rows.length, 1);
       assert.equal(Number(rate.rows[0].requests), 3);
 
-      await client.query("ROLLBACK");
+      await client.query("ROLLBACK TO SAVEPOINT upsert_probe");
 
       const residue = await client.query("SELECT COUNT(*)::int AS n FROM ingestion_metrics WHERE bucket = $1", [bucket]);
       assert.equal(residue.rows[0].n, 0, "the rolled-back probe must leave no rows behind");
     } finally {
+      await client.query("ROLLBACK").catch(() => {});
       await client.end().catch(() => {});
     }
   },
