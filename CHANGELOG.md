@@ -240,3 +240,6 @@
 ## jobs62 — 2026-11-22 19:20
 
 - Refresh browser pricing assets on deployment
+## jobs63 — 2026-11-22 19:47
+
+- Log missing Google OAuth settings without exposing credential values

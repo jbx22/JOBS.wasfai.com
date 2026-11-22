@@ -1,7 +1,7 @@
 {
-  "current": 62,
-  "lastDescription": "Refresh browser pricing assets on deployment",
-  "lastAt": "2026-11-22 19:20",
+  "current": 63,
+  "lastDescription": "Log missing Google OAuth settings without exposing credential values",
+  "lastAt": "2026-11-22 19:47",
   "history": [
     {
       "n": 1,
@@ -302,6 +302,11 @@
       "n": 62,
       "description": "Refresh browser pricing assets on deployment",
       "at": "2026-11-22 19:20"
+    },
+    {
+      "n": 63,
+      "description": "Log missing Google OAuth settings without exposing credential values",
+      "at": "2026-11-22 19:47"
     }
   ]
 }
