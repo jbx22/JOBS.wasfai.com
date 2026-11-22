@@ -148,7 +148,7 @@ test("Tampered session cookie is rejected", async () => {
   const cookie = await auth.sessionCookie({ sub: "user-1", email: "candidate@example.com" }, env.AUTH_COOKIE_SECRET);
   const valid = await auth.readSession(new Request("https://jobs.wasfai.com/", { headers: { Cookie: cookie.split(";")[0] } }), env.AUTH_COOKIE_SECRET);
   assert.equal(valid.sub, "user-1");
-  const damaged = cookie.split(";")[0].replace(/.$/, "x");
+  const damaged = cookie.split(";")[0].slice(0, -1) + "!";
   const invalid = await auth.readSession(new Request("https://jobs.wasfai.com/", { headers: { Cookie: damaged } }), env.AUTH_COOKIE_SECRET);
   assert.equal(invalid, null);
 });
