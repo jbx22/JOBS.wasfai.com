@@ -237,3 +237,6 @@
 ## jobs61 — 2026-11-22 18:57
 
 - Prepare production billing: verify exact orders, preserve active plans, harden callback and Google provider requests.
+## jobs62 — 2026-11-22 19:20
+
+- Refresh browser pricing assets on deployment
