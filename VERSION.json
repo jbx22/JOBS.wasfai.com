@@ -1,7 +1,7 @@
 {
-  "current": 65,
-  "lastDescription": "Use bounded form-encoded requests for Google sign-in",
-  "lastAt": "2026-11-22 20:07",
+  "current": 66,
+  "lastDescription": "Let Google reuse an existing sign-in session",
+  "lastAt": "2026-11-22 20:33",
   "history": [
     {
       "n": 1,
@@ -317,6 +317,11 @@
       "n": 65,
       "description": "Use bounded form-encoded requests for Google sign-in",
       "at": "2026-11-22 20:07"
+    },
+    {
+      "n": 66,
+      "description": "Let Google reuse an existing sign-in session",
+      "at": "2026-11-22 20:33"
     }
   ]
 }

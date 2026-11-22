@@ -29,7 +29,6 @@ export async function onRequestGet(context) {
   url.searchParams.set("state", state);
   url.searchParams.set("code_challenge", await pkceChallenge(verifier));
   url.searchParams.set("code_challenge_method", "S256");
-  url.searchParams.set("prompt", "select_account");
   const headers = new Headers({ Location: url.toString(), "Cache-Control": "no-store, private", "Referrer-Policy": "no-referrer" });
   headers.append("Set-Cookie", stateCookie(state));
   headers.append("Set-Cookie", pkceCookie(verifier));
