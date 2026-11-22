@@ -53,7 +53,15 @@ const STATE_KEYS = [
 export async function getAuthenticatedUser(context) {
   const config = authConfig(context.env || {}, context.request);
   const session = await readSession(context.request, config.cookieSecret);
-  return session || null;
+  if (!session) return null;
+  // Signed cookies prove identity, not ongoing authorization. A suspended,
+  // deleted, or missing user must lose access to every account-owned API.
+  const db = getJobDb(context.env);
+  if (!db) return null;
+  const account = await db.prepare(
+    "SELECT account_status FROM users WHERE id = ?",
+  ).bind(session.sub).first();
+  return account?.account_status === "active" ? session : null;
 }
 
 export async function requireAuthenticatedState(context) {
