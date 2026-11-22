@@ -18,5 +18,11 @@ export async function onRequestGet(context) {
       "SELECT created_at, last_login_at, account_status, accepted_terms_at, onboarding_completed_at FROM users WHERE id = ?",
     ).bind(session.sub).first();
   }
-  return json({ authenticated: Boolean(session), user: session || null, account, google_configured: Boolean(config.clientId) });
+  const authenticated = Boolean(session && account?.account_status === "active");
+  return json({
+    authenticated,
+    user: authenticated ? session : null,
+    account: authenticated ? account : null,
+    google_configured: Boolean(config.clientId && config.clientSecret && config.cookieSecret),
+  });
 }
