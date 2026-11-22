@@ -31,7 +31,7 @@ function jobPostingJsonLd(job, canonical) {
   // Never synthesize an employer publication date from our ingestion date.
   // Google requires the ORIGINAL posted date and a known physical location.
   const country = countryFor(job.location);
-  if (!dateIsValid(job.published_at) || !country || !job.description) return "";
+  if (!dateIsValid(job.published_at) || !country || !job.description || String(job.description).length >= 1200) return "";
   const data = {
     "@context": "https://schema.org",
     "@type": "JobPosting",
