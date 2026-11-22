@@ -12,7 +12,7 @@ Open `http://127.0.0.1:3030/app`.
 
 ## Versioning
 
-Use the [production rollback register](docs/ROLLBACK.md) to find numbered `jobNN` references and the matching Cloudflare deployments.
+Use the [production rollback register](docs/ROLLBACK.md) to find `jobsNN` release references and their matching Cloudflare deployments.
 
 Every code/UI/backend/config change MUST be followed by a version bump before the change is considered complete.
 
