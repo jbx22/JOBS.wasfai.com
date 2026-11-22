@@ -4,6 +4,7 @@ Sequential snapshots of the project. Each version is a frozen copy of the source
 
 | Version | Date | Description |
 | --- | --- | --- |
+| jobs62 | 2026-11-22 19:20 | Refresh browser pricing assets on deployment |
 | jobs61 | 2026-11-22 18:57 | Prepare production billing: verify exact orders, preserve active plans, harden callback and Google provider requests. |
 | jobs60 | 2026-11-22 18:04 | Add employer job feeds, evidence-based fit evaluation, vacancy import, screening and recruiter drafts, and follow-up calendar export. |
 | jobs59 | 2026-11-22 | Repair Google OAuth and durable account restrictions; add moderated employer recruitment, private applications, verified public job pages and sitemaps; enforce admin scopes and idempotent payment activation. |

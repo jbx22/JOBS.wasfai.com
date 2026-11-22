@@ -1,4 +1,4 @@
-const CACHE_NAME = "jobs-wasfai-v61-checkout";
+const CACHE_NAME = "jobs-wasfai-v62";
 const APP_SHELL = [
   "/",
   "/app",
@@ -10,7 +10,7 @@ const APP_SHELL = [
   "/admin.css",
   "/admin.js",
   "/pricing.css",
-  "/pricing.js",
+  "/pricing.js?v=jobs62",
   "/offline.html",
   "/manifest.webmanifest",
   "/brand-logo-192.png",
@@ -47,7 +47,7 @@ self.addEventListener("fetch", (event) => {
   }
   // HTML and application code are network-first so deployments update quickly,
   // with a versioned cached fallback for resilient read-only offline access.
-  if (url.origin === self.location.origin && (event.request.mode === "navigate" || /\/app\.js$/.test(url.pathname))) {
+  if (url.origin === self.location.origin && (event.request.mode === "navigate" || /^\/(?:app|pricing)\.js$/.test(url.pathname))) {
     event.respondWith(fetch(event.request, { cache: "no-store" }).then((response) => {
       if (response.ok && !/no-store|private/i.test(response.headers.get("Cache-Control") || "")) caches.open(CACHE_NAME).then((cache) => cache.put(event.request, response.clone()));
       return response;

@@ -1,7 +1,7 @@
 {
-  "current": 61,
-  "lastDescription": "Prepare production billing: verify exact orders, preserve active plans, harden callback and Google provider requests.",
-  "lastAt": "2026-11-22 18:57",
+  "current": 62,
+  "lastDescription": "Refresh browser pricing assets on deployment",
+  "lastAt": "2026-11-22 19:20",
   "history": [
     {
       "n": 1,
@@ -297,6 +297,11 @@
       "n": 61,
       "description": "Prepare production billing: verify exact orders, preserve active plans, harden callback and Google provider requests.",
       "at": "2026-11-22 18:57"
+    },
+    {
+      "n": 62,
+      "description": "Refresh browser pricing assets on deployment",
+      "at": "2026-11-22 19:20"
     }
   ]
 }
