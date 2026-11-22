@@ -1263,8 +1263,13 @@ function matchesCity(job, city) {
 }
 
 function reportedSalaryMin(job) {
-  const value = Number(job.salary_min_sar ?? job.salary_min ?? 0);
-  return Number.isFinite(value) && value > 0 && (!job.salary_currency || job.salary_currency === "SAR") ? value : null;
+  // A value explicitly labeled SAR is safe; a raw numeric salary without
+  // currency is not and must never be presented as Saudi riyals.
+  const sar = Number(job.salary_min_sar);
+  if (Number.isFinite(sar) && sar > 0) return sar;
+  if (String(job.salary_currency || "").toUpperCase() !== "SAR") return null;
+  const value = Number(job.salary_min);
+  return Number.isFinite(value) && value > 0 ? value : null;
 }
 
 function reportedExperienceYears(job) {
