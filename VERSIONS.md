@@ -4,6 +4,7 @@ Sequential snapshots of the project. Each version is a frozen copy of the source
 
 | Version | Date | Description |
 | --- | --- | --- |
+| jobs61 | 2026-11-22 18:57 | Prepare production billing: verify exact orders, preserve active plans, harden callback and Google provider requests. |
 | jobs60 | 2026-11-22 18:04 | Add employer job feeds, evidence-based fit evaluation, vacancy import, screening and recruiter drafts, and follow-up calendar export. |
 | jobs59 | 2026-11-22 | Repair Google OAuth and durable account restrictions; add moderated employer recruitment, private applications, verified public job pages and sitemaps; enforce admin scopes and idempotent payment activation. |
 | jobs58 | 2026-09-14 00:25 | Add a first-class public release marker: functions/api/version.js publishes the JOBS_RELEASE constant (jobs58) at GET /api/version with an x-jobs-release header, replacing reliance on the service worker CACHE_NAME as the only deployed release identity |

@@ -1,6 +1,6 @@
-import { authConfig, readSession } from "../auth/_auth.js";
-import { createMoyasarInvoice, moyasarStatus } from "../_moyasar.js";
-import { json, noContent } from "../_state.js";
+import { getAuthenticatedUser, json, noContent } from "../_state.js";
+import { requireProtectedRequest } from "../_security.js";
+import { createMoyasarInvoice, moyasarCheckoutUrl, moyasarInvoiceRecord, moyasarStatus } from "../_moyasar.js";
 import {
   ensureSubscriptionSchema,
   nextPeriodEnd,
@@ -13,7 +13,7 @@ import { getJobDb } from "../_db.js";
 
 export async function onRequestGet(context) {
   const db = getJobDb(context.env);
-  const session = await readCurrentSession(context);
+  const session = await getAuthenticatedUser(context);
   let subscription = null;
   if (db && session) {
     await ensureSubscriptionSchema(db);
@@ -35,13 +35,13 @@ export async function onRequestGet(context) {
 export async function onRequestPost(context) {
   const db = getJobDb(context.env);
   if (!db) return json({ error: "Subscription storage is not configured.", code: "STORAGE_NOT_CONFIGURED" }, 503);
-  const session = await readCurrentSession(context);
-  if (!session) return json({ error: "Sign in is required to choose a plan.", code: "AUTH_REQUIRED" }, 401);
+  const access = await requireProtectedRequest(context, "subscription-checkout", 6);
+  if (access.error) return access.error;
+  const session = access.user;
   const body = await readBody(context);
   const plan = planById(String(body.plan || ""));
   if (!plan) return json({ error: "Unknown subscription plan.", code: "BAD_PLAN", plans: publicPlans() }, 400);
   await ensureSubscriptionSchema(db);
-  await ensureUserRow(db, session);
   if (plan.id === "free") {
     await db.prepare(`
       INSERT INTO subscriptions(user_id, plan, status, ai_monthly_limit_usd, current_period_end, updated_at)
@@ -49,8 +49,11 @@ export async function onRequestPost(context) {
       ON CONFLICT(user_id) DO UPDATE SET plan=excluded.plan, status=excluded.status,
         ai_monthly_limit_usd=excluded.ai_monthly_limit_usd, current_period_end=excluded.current_period_end,
         updated_at=CURRENT_TIMESTAMP
-    `).bind(session.sub, plan.id, plan.status_after_select, plan.ai_monthly_limit_usd, nextPeriodEnd(plan.billing)).run();
+      WHERE subscriptions.plan='free' OR subscriptions.status<>'active'
+        OR COALESCE(subscriptions.current_period_end,'')<=?
+    `).bind(session.sub, plan.id, plan.status_after_select, plan.ai_monthly_limit_usd, nextPeriodEnd(plan.billing), new Date().toISOString().slice(0,10)).run();
     const current = await readCurrentSubscription(db, session.sub);
+    if (current?.plan !== "free") return json({ code: "PAID_PLAN_ACTIVE", error: "Your paid subscription stays active until the end of its term." }, 409);
     return json({
       ok: true,
       current,
@@ -60,90 +63,65 @@ export async function onRequestPost(context) {
     });
   }
 
-  const gateway = moyasarStatus(context.env || {}, context.request);
-  if (!gateway.configured) {
-    await savePendingSubscription(db, session.sub, plan);
-    return json({
-      ok: false,
-      current: await readCurrentSubscription(db, session.sub),
-      selected_plan: publicPlans().find((item) => item.id === plan.id),
-      next_action: "payment_gateway_setup_required",
-      payment_ready: false,
-      message: "Gold request is saved. Moyasar secret key is required before checkout can open.",
-    }, 409);
+  if (!moyasarStatus(context.env, context.request).configured) {
+    return json({ code: "MOYASAR_NOT_CONFIGURED", error: "Paid checkout is temporarily unavailable." }, 503);
   }
-
-  const invoice = await createCheckoutInvoice(context, session, plan);
-  await savePendingSubscription(db, session.sub, plan);
-  await db.prepare(`
-    INSERT INTO subscription_payments(user_id, plan, provider, provider_invoice_id, amount_halalas, amount_sar, currency, status, checkout_url, description, raw_payload, updated_at)
-    VALUES (?, ?, 'moyasar', ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-  `).bind(
-    session.sub,
-    plan.id,
-    invoice.id || "",
-    Number(invoice.amount || planAmountHalalas(plan)),
-    Number(invoice.amount || planAmountHalalas(plan)) / 100,
-    invoice.currency || "SAR",
-    invoice.status || "initiated",
-    invoice.url || "",
-    invoice.description || paymentDescription(plan),
-    JSON.stringify(invoice),
-  ).run();
-  return json({
-    ok: true,
-    current: await readCurrentSubscription(db, session.sub),
-    selected_plan: publicPlans().find((item) => item.id === plan.id),
-    next_action: "redirect_to_moyasar",
-    checkout_url: invoice.url,
-    invoice: publicInvoice(invoice),
-    message: "Moyasar checkout is ready.",
-  }, 201);
+  return checkout(context, db, session, plan);
 }
 
-async function savePendingSubscription(db, userId, plan) {
-  await db.prepare(`
-    INSERT INTO subscriptions(user_id, plan, status, ai_monthly_limit_usd, current_period_end, updated_at)
-    VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-    ON CONFLICT(user_id) DO UPDATE SET plan=excluded.plan, status=excluded.status,
-      ai_monthly_limit_usd=excluded.ai_monthly_limit_usd, current_period_end=excluded.current_period_end,
-      updated_at=CURRENT_TIMESTAMP
-  `).bind(
-    userId,
-    plan.id,
-    plan.status_after_select,
-    plan.ai_monthly_limit_usd,
-    nextPeriodEnd(plan.billing),
-  ).run();
+async function checkout(context, db, session, plan) {
+  await db.prepare(`CREATE TABLE IF NOT EXISTS subscription_checkout_locks (
+    user_id TEXT PRIMARY KEY, claim_id TEXT NOT NULL, expires_at TEXT NOT NULL
+  )`).run();
+  const now = new Date().toISOString();
+  const claim = crypto.randomUUID();
+  const lock = await db.prepare(`INSERT INTO subscription_checkout_locks(user_id, claim_id, expires_at) VALUES (?, ?, ?)
+    ON CONFLICT(user_id) DO UPDATE SET claim_id=excluded.claim_id, expires_at=excluded.expires_at
+    WHERE subscription_checkout_locks.expires_at<=? RETURNING claim_id`)
+    .bind(session.sub, claim, new Date(Date.now() + 60000).toISOString(), now).first();
+  if (lock?.claim_id !== claim) return json({ code: "CHECKOUT_IN_PROGRESS", error: "Checkout is being prepared. Try again in a moment." }, 409);
+  try {
+    const current = await readCurrentSubscription(db, session.sub);
+    if (current?.status === "active" && current.plan !== "free" && current.plan !== plan.id && current.current_period_end > now.slice(0,10)) {
+      return json({ code: "PAID_PLAN_ACTIVE", error: "You can change paid plans after your current term ends." }, 409);
+    }
+    const previous = await db.prepare(`SELECT id, plan, raw_payload, checkout_url FROM subscription_payments
+      WHERE user_id=? AND provider='moyasar' AND status='initiated' AND checkout_url<>'' ORDER BY id DESC LIMIT 1`)
+      .bind(session.sub).first();
+    const saved = parseInvoiceRecord(previous?.raw_payload);
+    const previousUrl = moyasarCheckoutUrl(previous?.checkout_url);
+    if (previousUrl && saved.expired_at > now) {
+      if (previous.plan !== plan.id) return json({ code: "OTHER_ORDER_OPEN", error: "An invoice is already open for another plan. Resume that checkout or wait for it to expire." }, 409);
+      return checkoutResponse(plan, current, previousUrl, previous.id);
+    }
+    const order = await db.prepare(`INSERT INTO subscription_payments(user_id, plan, amount_halalas, amount_sar, currency, description)
+      VALUES (?, ?, ?, ?, 'SAR', ?) RETURNING id`).bind(session.sub, plan.id, planAmountHalalas(plan), plan.price_sar, paymentDescription(plan)).first();
+    const invoice = await createCheckoutInvoice(context, session, plan, order.id);
+    await db.prepare(`UPDATE subscription_payments SET provider_invoice_id=?, checkout_url=?, raw_payload=?, updated_at=CURRENT_TIMESTAMP
+      WHERE id=? AND user_id=?`).bind(invoice.id, invoice.url, JSON.stringify(moyasarInvoiceRecord(invoice)), order.id, session.sub).run();
+    return checkoutResponse(plan, current, invoice.url, order.id);
+  } catch {
+    return json({ code: "CHECKOUT_UNAVAILABLE", error: "Moyasar checkout could not be opened. Try again shortly." }, 502);
+  } finally {
+    await db.prepare("DELETE FROM subscription_checkout_locks WHERE user_id=? AND claim_id=?").bind(session.sub, claim).run();
+  }
+}
+
+function checkoutResponse(plan, current, url, orderId) {
+  return json({ ok: true, current, selected_plan: publicPlans().find((item) => item.id === plan.id),
+    next_action: "redirect_to_moyasar", checkout_url: url, order_id: String(orderId) }, 201);
+}
+
+function parseInvoiceRecord(value) {
+  try { return JSON.parse(value) || {}; } catch { return {}; }
 }
 
 export async function onRequestOptions() {
   return noContent();
 }
 
-async function readCurrentSession(context) {
-  const config = authConfig(context.env || {}, context.request);
-  return readSession(context.request, config.cookieSecret);
-}
-
 async function readBody(context) {
   try { return await context.request.json(); } catch { return {}; }
-}
-
-async function ensureUserRow(db, session) {
-  await db.prepare(`
-    CREATE TABLE IF NOT EXISTS users (
-      id TEXT PRIMARY KEY, email TEXT NOT NULL, display_name TEXT NOT NULL DEFAULT '',
-      picture_url TEXT NOT NULL DEFAULT '', provider TEXT NOT NULL DEFAULT 'google',
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, last_login_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      account_status TEXT NOT NULL DEFAULT 'active', accepted_terms_at TEXT, onboarding_completed_at TEXT
-    )
-  `).run();
-  await db.prepare(`
-    INSERT INTO users(id, email, display_name, provider)
-    VALUES (?, ?, ?, ?)
-    ON CONFLICT(id) DO UPDATE SET email=excluded.email, display_name=excluded.display_name
-  `).bind(session.sub, session.email || "", session.name || "", session.provider || "google").run();
 }
 
 async function readCurrentSubscription(db, userId) {
@@ -151,42 +129,30 @@ async function readCurrentSubscription(db, userId) {
     .bind(userId).first();
 }
 
-async function createCheckoutInvoice(context, session, plan) {
-  const origin = new URL(context.request.url).origin;
+async function createCheckoutInvoice(context, session, plan, orderId) {
+  const origin = context.env?.ENVIRONMENT === "production" ? "https://jobs.wasfai.com" : new URL(context.request.url).origin;
   const amount = planAmountHalalas(plan);
+  const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
   const invoice = await createMoyasarInvoice(context.env || {}, {
     amount,
     currency: "SAR",
     description: paymentDescription(plan),
     callback_url: `${origin}/api/payments/moyasar/callback`,
-    success_url: `${origin}/pricing/?payment=success&plan=${encodeURIComponent(plan.id)}`,
+    success_url: `${origin}/pricing/?payment=success&order=${orderId}`,
     back_url: `${origin}/pricing/?payment=cancelled&plan=${encodeURIComponent(plan.id)}`,
-    expired_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+    expired_at: expiresAt,
     metadata: {
       user_id: session.sub,
-      email: session.email || "",
       plan: plan.id,
       app: "jobs-wasfai",
+      order: String(orderId),
     },
   });
-  if (!invoice?.url || !invoice?.id) {
-    const error = new Error("Moyasar did not return a checkout URL.");
-    error.code = "MOYASAR_BAD_INVOICE";
-    throw error;
+  const url = moyasarCheckoutUrl(invoice?.url);
+  if (!url || !invoice?.id || Number(invoice.amount) !== amount || invoice.currency !== "SAR" || invoice.status !== "initiated") {
+    throw new Error("Moyasar returned an invalid invoice.");
   }
-  return invoice;
-}
-
-function publicInvoice(invoice) {
-  return {
-    id: invoice.id,
-    status: invoice.status,
-    amount: invoice.amount,
-    currency: invoice.currency,
-    amount_format: invoice.amount_format,
-    url: invoice.url,
-    expired_at: invoice.expired_at,
-  };
+  return { ...invoice, url, expired_at: invoice.expired_at || expiresAt };
 }
 
 function publicGatewayStatus(context) {

@@ -35,6 +35,7 @@ export async function onRequestGet(context) {
   try {
     const token = await fetch("https://oauth2.googleapis.com/token", {
       method: "POST",
+      redirect: "error",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({
         code, client_id: config.clientId, client_secret: config.clientSecret,
@@ -50,6 +51,7 @@ export async function onRequestGet(context) {
     }
     const userinfo = await fetch("https://openidconnect.googleapis.com/v1/userinfo", {
       headers: { Authorization: "Bearer " + tokenData.access_token },
+      redirect: "error",
       signal: AbortSignal.timeout(10000),
     });
     if (!userinfo.ok) return failure("USERINFO_FAILED", 502, "Google account verification failed.");
