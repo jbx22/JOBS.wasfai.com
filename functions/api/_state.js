@@ -53,7 +53,14 @@ const STATE_KEYS = [
 export async function getAuthenticatedUser(context) {
   const config = authConfig(context.env || {}, context.request);
   const session = await readSession(context.request, config.cookieSecret);
-  return session || null;
+  if (!session) return null;
+  const db = getJobDb(context.env);
+  if (!db) return null;
+  // Never trust a signed but stale cookie when an admin has suspended the user.
+  const account = await db.prepare(
+    "SELECT account_status FROM users WHERE id = ?",
+  ).bind(session.sub).first();
+  return account?.account_status === "active" ? session : null;
 }
 
 export async function requireAuthenticatedState(context) {

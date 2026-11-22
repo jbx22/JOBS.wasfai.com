@@ -12,33 +12,44 @@ export async function onRequestGet(context) {
   if (!config.clientId || !config.clientSecret || !config.cookieSecret) {
     return json({ error: "Google OAuth credentials are missing.", code: "GOOGLE_OAUTH_NOT_CONFIGURED" }, 503);
   }
+  const db = getJobDb(context.env);
+  if (!db) return json({ error: "Account storage is unavailable.", code: "STORAGE_NOT_CONFIGURED" }, 503);
   if (!code || !state || state !== cookies.jobs_oauth_state) {
     return json({ error: "Invalid OAuth state.", code: "BAD_OAUTH_STATE" }, 400, { "Set-Cookie": clearStateCookie() });
   }
 
   const redirectUri = `${config.origin}/api/auth/google/callback`;
-  const token = await fetch("https://oauth2.googleapis.com/token", {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
-      code,
-      client_id: config.clientId,
-      client_secret: config.clientSecret,
-      redirect_uri: redirectUri,
-      grant_type: "authorization_code",
-    }),
-  });
-  if (!token.ok) return json({ error: "Google token exchange failed.", code: "TOKEN_EXCHANGE_FAILED" }, 502);
-  const tokenData = await token.json();
-  const userinfo = await fetch("https://openidconnect.googleapis.com/v1/userinfo", {
-    headers: { "Authorization": `Bearer ${tokenData.access_token}` },
-  });
-  if (!userinfo.ok) return json({ error: "Google userinfo failed.", code: "USERINFO_FAILED" }, 502);
-  const user = await userinfo.json();
+  let user;
+  try {
+    const token = await fetch("https://oauth2.googleapis.com/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        code,
+        client_id: config.clientId,
+        client_secret: config.clientSecret,
+        redirect_uri: `${config.origin}/api/auth/google/callback`,
+        grant_type: "authorization_code",
+      }),
+    });
+    if (!token.ok) return json({ error: "Google token exchange failed.", code: "TOKEN_EXCHANGE_FAILED" }, 502);
+    const tokenData = await token.json();
+    if (!tokenData?.access_token) return json({ error: "Google did not return an access token.", code: "TOKEN_EXCHANGE_FAILED" }, 502);
+    const userinfo = await fetch("https://openidconnect.googleapis.com/v1/userinfo", {
+      headers: { Authorization: `Bearer ${tokenData.access_token}` },
+    });
+    if (!userinfo.ok) return json({ error: "Google userinfo failed.", code: "USERINFO_FAILED" }, 502);
+    user = await userinfo.json();
+  } catch {
+    return json({ error: "Google sign-in service is temporarily unavailable.", code: "GOOGLE_OAUTH_UPSTREAM_ERROR" }, 502);
+  }
+  if (!user?.sub || !user?.email || user.email_verified !== true) {
+    return json({ error: "Google account identity or verified email is missing.", code: "UNVERIFIED_GOOGLE_ACCOUNT" }, 403);
+  }
   let firstLogin = false;
   let account = null;
-  if (getJobDb(context.env)) {
-    await getJobDb(context.env).prepare(`
+  try {
+    await db.prepare(`
       CREATE TABLE IF NOT EXISTS users (
         id TEXT PRIMARY KEY, email TEXT NOT NULL, display_name TEXT NOT NULL DEFAULT '',
         picture_url TEXT NOT NULL DEFAULT '', provider TEXT NOT NULL DEFAULT 'google',
@@ -46,22 +57,28 @@ export async function onRequestGet(context) {
         account_status TEXT NOT NULL DEFAULT 'active', accepted_terms_at TEXT, onboarding_completed_at TEXT
       )
     `).run();
-    const existing = await getJobDb(context.env).prepare(
+    const existing = await db.prepare(
       "SELECT onboarding_completed_at FROM users WHERE id = ?",
     ).bind(user.sub).first();
     firstLogin = !existing?.onboarding_completed_at;
     const acceptedTerms = cookies.jobs_terms_consent === "1";
-    await getJobDb(context.env).prepare(`
+    await db.prepare(`
       INSERT INTO users (id, email, display_name, picture_url, provider, accepted_terms_at)
       VALUES (?, ?, ?, ?, 'google', CASE WHEN ? THEN CURRENT_TIMESTAMP ELSE NULL END)
       ON CONFLICT(id) DO UPDATE SET
         email=excluded.email, display_name=excluded.display_name, picture_url=excluded.picture_url,
-        last_login_at=CURRENT_TIMESTAMP, account_status='active',
+        last_login_at=CURRENT_TIMESTAMP,
         accepted_terms_at=COALESCE(users.accepted_terms_at, excluded.accepted_terms_at)
-    `).bind(user.sub, user.email || "", user.name || "", user.picture || "", acceptedTerms ? 1 : 0).run();
-    account = await getJobDb(context.env).prepare(
+    `).bind(user.sub, user.email, user.name || "", user.picture || "", acceptedTerms ? 1 : 0).run();
+    account = await db.prepare(
       "SELECT account_status FROM users WHERE id = ?",
     ).bind(user.sub).first();
+  } catch {
+    return json({ error: "Account storage is temporarily unavailable.", code: "ACCOUNT_STORAGE_UNAVAILABLE" }, 503);
+  }
+  // The admin's suspension decision must survive every subsequent Google login.
+  if (account?.account_status !== "active") {
+    return json({ error: "This account is suspended or unavailable.", code: "ACCOUNT_NOT_ACTIVE" }, 403);
   }
   const cookie = await sessionCookie(
     {

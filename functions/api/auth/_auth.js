@@ -16,16 +16,18 @@ export function authConfig(env, request) {
 }
 
 export function parseCookies(request) {
-  return Object.fromEntries(
-    String(request.headers.get("Cookie") || "")
-      .split(";")
-      .map((part) => part.trim())
-      .filter(Boolean)
-      .map((part) => {
-        const index = part.indexOf("=");
-        return [part.slice(0, index), decodeURIComponent(part.slice(index + 1))];
-      }),
-  );
+  const cookies = Object.create(null);
+  for (const item of String(request.headers.get("Cookie") || "").split(";")) {
+    const part = item.trim();
+    const separator = part.indexOf("=");
+    if (separator <= 0) continue;
+    const name = part.slice(0, separator);
+    const value = part.slice(separator + 1);
+    // An unrelated malformed cookie must not make Google OAuth or sessions fail.
+    try { cookies[name] = decodeURIComponent(value); }
+    catch { cookies[name] = value; }
+  }
+  return cookies;
 }
 
 export function stateCookie(value) {

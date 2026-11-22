@@ -1,10 +1,19 @@
 import { authConfig, json, returnCookie, stateCookie, termsCookie } from "../_auth.js";
+import { getJobDb } from "../../_db.js";
 
 export async function onRequestGet(context) {
   const config = authConfig(context.env || {}, context.request);
   const requestUrl = new URL(context.request.url);
-  if (!config.clientId) {
+  // OAuth state cookies are host-only. Start on the same origin that will
+  // receive the callback, including when someone opens the Pages preview URL.
+  if (requestUrl.origin !== config.origin) {
+    return Response.redirect(`${config.origin}${requestUrl.pathname}${requestUrl.search}`, 302);
+  }
+  if (!config.clientId || !config.clientSecret || !config.cookieSecret) {
     return json({ error: "Google OAuth is not configured.", code: "GOOGLE_OAUTH_NOT_CONFIGURED" }, 503);
+  }
+  if (!getJobDb(context.env)) {
+    return json({ error: "Account storage is unavailable.", code: "STORAGE_NOT_CONFIGURED" }, 503);
   }
   const state = crypto.randomUUID();
   const redirectUri = `${config.origin}/api/auth/google/callback`;
