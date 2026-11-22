@@ -15,7 +15,7 @@ export function authConfig(env, request) {
     || hostname === "jobs-wasfai.pages.dev"
     || hostname.endsWith(".jobs-wasfai.pages.dev");
   return {
-    origin: configuredOrigin || (deployedHost || env.ENVIRONMENT === "production" ? productionOrigin : url.origin),
+    origin: deployedHost ? productionOrigin : (configuredOrigin || (env.ENVIRONMENT === "production" ? productionOrigin : url.origin)),
     clientId: env.GOOGLE_CLIENT_ID || "",
     clientSecret: env.GOOGLE_CLIENT_SECRET || "",
     cookieSecret: env.AUTH_COOKIE_SECRET || "",
