@@ -1,6 +1,8 @@
 import { getJobDb } from "./_db.js";
-import { CENTRAL_BOARDS, ensureEmployerBoards, GOVERNMENT_BOARDS, GOVERNMENT_CONNECTOR, SOURCE_CONNECTORS } from "./boards.js";
+import { ensureEmployerBoards, GOVERNMENT_BOARDS, GOVERNMENT_CONNECTOR, PORTAL_ONLY_BOARDS,
+  presentCentralSource, SMARTRECRUITERS_BOARDS, SMARTRECRUITERS_CONNECTOR, SOURCE_CONNECTORS } from "./boards.js";
 import { parseGovernmentPosting, parseGovernmentSitemap } from "./government.js";
+import { fetchSmartRecruitersJobs } from "./smartrecruiters.js";
 
 const GOV_JOBS_PER_SCAN = 24;
 const DESCRIPTION_LIMIT = 6000;
@@ -25,7 +27,7 @@ export default {
         const id = message.body?.id;
         const source = typeof id === "string" && id ? await sourceById(env, id) : null;
         const due = source?.enabled && (!source.next_scan_at || source.next_scan_at <= new Date().toISOString());
-        if (source && (message.body.force === true || due)) await scanSource(env, source);
+        if (source && !isPortalOnly(source) && (message.body.force === true || due)) await scanSource(env, source);
         message.ack();
       } catch (error) {
         await recordSourceError(env, message.body?.id, error);
@@ -43,10 +45,8 @@ export default {
       return json({ ok: true, service: "jobs-wasfai-ingestion", at: new Date().toISOString() });
     }
     if (url.pathname === "/sources" && request.method === "GET") {
-      const { results } = await getJobDb(env).prepare("SELECT id, label, url, region, connector_mode, last_scanned_at, next_scan_at, last_error FROM sources WHERE visibility = 'central' AND owner_user_id = '' AND enabled = 1 ORDER BY label").all();
-      return json({ ok: true, sources: results.map((source) => withSourceQuality({ ...source,
-        url: CENTRAL_BOARDS.find((board) => board.id === source.id)?.portal || source.url,
-      })) });
+      const { results } = await getJobDb(env).prepare("SELECT id, label, url, region, connector_mode, last_scanned_at, next_scan_at, last_error FROM sources WHERE visibility = 'central' AND owner_user_id = '' AND (enabled = 1 OR connector_mode = 'portal_only') ORDER BY label").all();
+      return json({ ok: true, sources: results.map(presentCentralSource) });
     }
     if (url.pathname === "/jobs" && request.method === "GET") {
       const limit = Math.max(1, Math.min(Math.floor(Number(url.searchParams.get("limit")) || 50), 100));
@@ -85,6 +85,7 @@ export default {
       if (!source || (source.visibility === "private" && source.owner_user_id !== body.owner_user_id)) {
         return json({ ok: false, error: "source not found" }, 404);
       }
+      if (isPortalOnly(source)) return json({ ok: false, error: "Open this source on its official portal." }, 409);
       if (url.searchParams.get("mode") === "direct") {
         try {
           const result = await scanSource(env, source);
@@ -137,16 +138,27 @@ async function enqueueDueSources(env) {
 
 async function scanSource(env, source) {
   const government = source?.connector_mode === GOVERNMENT_CONNECTOR;
-  if (!source || (!government && !SOURCE_CONNECTORS.includes(source.connector_mode))) {
+  const smartRecruiters = source?.connector_mode === SMARTRECRUITERS_CONNECTOR;
+  if (!source || isPortalOnly(source) || (!government && !smartRecruiters && !SOURCE_CONNECTORS.includes(source.connector_mode))) {
     throw new Error("Unsupported connector mode.");
   }
-  const result = government ? await fetchGovernmentJobs(source) : { jobs: parseSourcePayload(await fetchSourcePayload(env, source), source).slice(0, 100) };
+  let result;
+  if (government) {
+    result = await fetchGovernmentJobs(source);
+  } else if (smartRecruiters) {
+    const board = SMARTRECRUITERS_BOARDS.find((item) => item.id === source.id && item.url === source.url);
+    if (!board || source.visibility !== "central" || source.owner_user_id) throw new Error("Unregistered SmartRecruiters source");
+    result = await fetchSmartRecruitersJobs(board, async (url) =>
+      JSON.parse(await fetchPublicPayload(url, /application\/json/, { official: true })));
+  } else {
+    result = { jobs: parseSourcePayload(await fetchSourcePayload(env, source), source).slice(0, 100) };
+  }
   const now = new Date().toISOString();
   const jobs = result.jobs.filter((job) => !job.valid_through || job.valid_through >= now);
   const db = getJobDb(env);
   const writes = jobs.map((job) => {
-    const dedupe = government ? `${source.id}|${job.requisition}` : dedupeKey(source.id, job.title, job.employer, job.location);
-    const id = `${source.id}-${government ? job.requisition : hash(dedupe).slice(0, 12)}`;
+    const dedupe = job.requisition ? `${source.id}|${job.requisition}` : dedupeKey(source.id, job.title, job.employer, job.location);
+    const id = `${source.id}-${job.requisition || hash(dedupe).slice(0, 12)}`;
     const metadata = classifyJob(job);
     return db.prepare(`INSERT INTO jobs
         (id, source_id, source_url, title, employer, location, description, score, status, discovered_at, updated_at, dedupe_key,
@@ -165,7 +177,7 @@ async function scanSource(env, source) {
   await db.prepare(
     "UPDATE sources SET last_scanned_at = ?1, next_scan_at = ?2, last_error = ?3, updated_at = ?1 WHERE id = ?4",
   ).bind(now, next, result.warning || "", source.id).run();
-  const grace = government && result.complete ? 2 * Number(source.interval_minutes || 360) * 60_000 : 14 * 86400_000;
+  const grace = result.complete ? 2 * Number(source.interval_minutes || 360) * 60_000 : 14 * 86400_000;
   await archiveStaleJobs(env, source.id, now, grace);
   await incrementMetric(env, "scan_success", source.id);
   await incrementMetric(env, "jobs_parsed", source.id, jobs.length);
@@ -777,15 +789,8 @@ async function recordSourceError(env, id, error) {
   await incrementMetric(env, "scan_error", id);
 }
 
-function withSourceQuality(source) {
-  return {
-    ...source,
-    source_quality: source.last_error
-      ? "needs_attention"
-      : source.last_scanned_at
-        ? "live_verified"
-        : "not_verified",
-  };
+function isPortalOnly(source) {
+  return source.connector_mode === "portal_only" || PORTAL_ONLY_BOARDS.some(({ id }) => source.id === id);
 }
 
 function errorMessage(error) {

@@ -40,6 +40,7 @@ test("cron seeds employer feeds, imports live rows and backs off a blocked sourc
     const url = String(input);
     if (url.includes("careem")) return new Response(null, { status: 403 });
     if (url.endsWith("/sitemap.xml")) return new Response('<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"></urlset>', { headers: { "Content-Type": "text/xml" } });
+    if (url.startsWith("https://api.smartrecruiters.com/")) return Response.json({ content: [], totalFound: 0 });
     return Response.json({ jobs: [url.includes("foodics") ? workableJob : greenhouseJob] });
   } });
   fixture.db.exec(schema);

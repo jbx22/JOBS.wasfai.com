@@ -430,6 +430,7 @@ function connectorModeLabel(mode) {
       lever: "لوحة Lever",
       ashby: "لوحة Ashby",
       workable: "لوحة Workable",
+      smartrecruiters: "لوحة SmartRecruiters",
       saudi_government: "بوابة حكومية رسمية",
       approved_api: "يتطلب API معتمد",
       portal_only: "بوابة موثقة — فتح مباشر",
@@ -2271,7 +2272,7 @@ function sourceCardHtml(s) {
   </div>
   <div class="kvs" style="margin-top:6px">
     <div>
-      <h4 style="font-size:12.5px">فحص تلقائي</h4>
+      <h4 style="font-size:12.5px">${s.connector_mode === "portal_only" ? "البوابة الرسمية" : "فحص تلقائي"}</h4>
       <p>${s.last_error ? esc(s.last_error) : s.connector_note ? esc(s.connector_note) : (s.last_scanned_at ? `آخر فحص: ${esc(s.last_scanned_at)}` : "لم يتم الفحص بعد")}</p>
     </div>
     <div class="right">
@@ -3954,7 +3955,7 @@ function demoSources() {
     { id: "khamsat", label: "Khamsat", region: "MENA", url: "https://khamsat.com/", enabled: true, scheduled: false, interval_minutes: 360, last_scanned_at: "", last_error: "", job_count: 0, custom: false, connector_mode: "public_html" },
     { id: "linkedin", label: "LinkedIn", region: "Global", url: "https://www.linkedin.com/jobs/", enabled: true, scheduled: false, interval_minutes: 360, last_scanned_at: "", last_error: "", job_count: 0, custom: false, connector_mode: "approved_api" },
     { id: "indeed", label: "Indeed", region: "Global", url: "https://www.indeed.com/jobs", enabled: true, scheduled: false, interval_minutes: 360, last_scanned_at: "", last_error: "", job_count: 0, custom: false, connector_mode: "approved_api" },
-    { id: "hiringcafe", label: "Hiring Cafe", region: "Global", url: "https://hiring.cafe/", enabled: true, scheduled: false, interval_minutes: 360, last_scanned_at: "", last_error: "", job_count: 0, custom: false, connector_mode: "public_html" },
+    { id: "hiringcafe", label: "HiringCafe", region: "Global", url: "https://hiringcafe.com/", enabled: true, scheduled: false, interval_minutes: 360, last_scanned_at: "", last_error: "", job_count: 0, custom: false, connector_mode: "portal_only", connector_note: "ابحث وقدّم عبر بوابة HiringCafe الرسمية." },
   ];
 }
 

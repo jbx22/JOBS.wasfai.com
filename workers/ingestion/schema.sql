@@ -86,7 +86,7 @@ INSERT OR IGNORE INTO sources
 VALUES
   ('wazzuf', 'WUZZUF', 'https://wuzzuf.net/search/jobs/?q=project%20manager&a=hpb', 'Egypt, MENA', 'project manager', 1, 'public_html', 360, ''),
   ('bayt', 'Bayt', 'https://www.bayt.com/en/international/jobs/project-manager-jobs/', 'MENA', 'project manager', 1, 'public_html', 360, ''),
-  ('hiringcafe', 'Hiring Cafe', 'https://hiring.cafe/', 'Global', 'operations', 1, 'public_html', 1440, '');
+  ('hiringcafe', 'HiringCafe', 'https://hiringcafe.com/', 'Global', '', 0, 'portal_only', 1440, '');
 
 INSERT OR IGNORE INTO sources
   (id, label, url, region, query, enabled, connector_mode, interval_minutes, next_scan_at)
