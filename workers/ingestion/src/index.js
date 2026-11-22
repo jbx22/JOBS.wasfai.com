@@ -55,7 +55,7 @@ export default {
           location: job.location,
           description: job.description,
           source_url: job.source_url,
-          published_at: job.published_at || null,
+          published_at: job.posted_at || null,
           valid_through: job.valid_through || null,
           verification_status: job.verification_status,
         },
