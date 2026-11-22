@@ -13,6 +13,7 @@ Each `jobsNN` release reference is a GitHub branch pinned to the exact source co
 | [`jobs65`](https://github.com/jbx22/JOBS.wasfai.com/tree/jobs65) | [0de58eb3](https://dash.cloudflare.com/20af8653055a0b9e99aa4a30e346f3d4/pages/view/jobs-wasfai/0de58eb3-61eb-4ac7-bf04-b00d6bd1d008) | `ab863cba-9b5d-4eb0-b2e7-e243cec36585` |
 | [`jobs66`](https://github.com/jbx22/JOBS.wasfai.com/tree/jobs66) | [73115f35](https://dash.cloudflare.com/20af8653055a0b9e99aa4a30e346f3d4/pages/view/jobs-wasfai/73115f35-3dd6-4700-ba05-ad83ef93f8e5) | `ab863cba-9b5d-4eb0-b2e7-e243cec36585` |
 | [`jobs67`](https://github.com/jbx22/JOBS.wasfai.com/tree/jobs67) | [df0de20d](https://dash.cloudflare.com/20af8653055a0b9e99aa4a30e346f3d4/pages/view/jobs-wasfai/df0de20d-5ca6-4f1f-9388-560662e2c3db) | `ab863cba-9b5d-4eb0-b2e7-e243cec36585` |
+| [`jobs68`](https://github.com/jbx22/JOBS.wasfai.com/tree/jobs68) | [1c2a8001](https://dash.cloudflare.com/20af8653055a0b9e99aa4a30e346f3d4/pages/view/jobs-wasfai/1c2a8001-d9df-42fc-9204-76cd7c35f312) | `ab863cba-9b5d-4eb0-b2e7-e243cec36585` |
 
 ## Restore a release
 
@@ -20,7 +21,7 @@ Each `jobsNN` release reference is a GitHub branch pinned to the exact source co
 2. In the `jobs-wasfai-ingestion` Worker's **Deployments** tab, roll back to the Worker version in the same row if a different version is active. [Cloudflare Workers rollback instructions](https://developers.cloudflare.com/workers/versions-and-deployments/rollbacks/)
 3. Verify the expected release marker and inspect the restored Worker deployment. Confirm the vacancy listings are reachable. [Release marker](https://jobs.wasfai.com/api/version) · [Worker health](https://jobs-wasfai-ingestion.jabosaag.workers.dev/health) · [Vacancies](https://jobs.wasfai.com/vacancies)
 
-The first rollback target from `jobs67` is `jobs66`. Verify Google sign-in after restoring any deployment because OAuth behavior and credential configuration can differ. Releases `jobs60` through `jobs67` use the same ingestion Worker version. Rolling back Pages between these releases does not require rolling back the Worker. If the active Worker version differs, run this command from a Jobs checkout:
+The first rollback target from `jobs68` is `jobs67`. Verify Google sign-in after restoring any deployment because OAuth behavior and credential configuration can differ. Releases `jobs60` through `jobs68` use the same ingestion Worker version. Rolling back Pages between these releases does not require rolling back the Worker. If the active Worker version differs, run this command from a Jobs checkout:
 
 ```sh
 npx wrangler rollback ab863cba-9b5d-4eb0-b2e7-e243cec36585 --config workers/ingestion/wrangler.jsonc
@@ -30,4 +31,4 @@ These references are for code and deployment recovery. Data restoration requires
 
 ## Record the next release
 
-Create `jobs68` for the next verified production release if it has that version marker. Add a row with the release branch, exact Pages deployment link, and Worker version ID. Keep the previous release branches pinned to their original commits.
+Create `jobs69` for the next verified production release if it has that version marker. Add a row with the release branch, exact Pages deployment link, and Worker version ID. Keep the previous release branches pinned to their original commits.
