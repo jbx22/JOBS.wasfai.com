@@ -1,22 +1,17 @@
-import { authConfig, json, readSession } from "./_auth.js";
-import { getJobDb } from "../_db.js";
+import { authConfig, AuthError, clearSessionCookie, json, readActiveSession } from "./_auth.js";
 
 export async function onRequestGet(context) {
   const config = authConfig(context.env || {}, context.request);
-  const session = await readSession(context.request, config.cookieSecret);
-  let account = null;
-  if (session && getJobDb(context.env)) {
-    await getJobDb(context.env).prepare(`
-      CREATE TABLE IF NOT EXISTS users (
-        id TEXT PRIMARY KEY, email TEXT NOT NULL, display_name TEXT NOT NULL DEFAULT '',
-        picture_url TEXT NOT NULL DEFAULT '', provider TEXT NOT NULL DEFAULT 'google',
-        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, last_login_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        account_status TEXT NOT NULL DEFAULT 'active', accepted_terms_at TEXT, onboarding_completed_at TEXT
-      )
-    `).run();
-    account = await getJobDb(context.env).prepare(
-      "SELECT created_at, last_login_at, account_status, accepted_terms_at, onboarding_completed_at FROM users WHERE id = ?",
-    ).bind(session.sub).first();
+  try {
+    const active = await readActiveSession(context.request, context.env || {});
+    return json({
+      authenticated: Boolean(active), user: active?.session || null, account: active?.account || null,
+      google_configured: Boolean(config.clientId && config.clientSecret && config.cookieSecret),
+    });
+  } catch (error) {
+    if (!(error instanceof AuthError)) throw error;
+    return json({ authenticated: false, user: null, account: null, error: error.message, code: error.code,
+      google_configured: Boolean(config.clientId && config.clientSecret && config.cookieSecret) },
+    error.status, error.status < 500 ? { "Set-Cookie": clearSessionCookie() } : {});
   }
-  return json({ authenticated: Boolean(session), user: session || null, account, google_configured: Boolean(config.clientId) });
 }

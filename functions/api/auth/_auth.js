@@ -1,3 +1,5 @@
+import { getJobDb } from "../_db.js";
+
 const COOKIE_NAME = "jobs_session";
 const STATE_COOKIE = "jobs_oauth_state";
 const RETURN_COOKIE = "jobs_oauth_return";
@@ -16,16 +18,14 @@ export function authConfig(env, request) {
 }
 
 export function parseCookies(request) {
-  return Object.fromEntries(
-    String(request.headers.get("Cookie") || "")
-      .split(";")
-      .map((part) => part.trim())
-      .filter(Boolean)
-      .map((part) => {
-        const index = part.indexOf("=");
-        return [part.slice(0, index), decodeURIComponent(part.slice(index + 1))];
-      }),
-  );
+  const cookies = {};
+  for (const part of String(request.headers.get("Cookie") || "").split(";")) {
+    const index = part.indexOf("=");
+    if (index < 1) continue;
+    const key = part.slice(0, index).trim();
+    try { cookies[key] = decodeURIComponent(part.slice(index + 1).trim()); } catch { /* Ignore malformed cookies. */ }
+  }
+  return cookies;
 }
 
 export function stateCookie(value) {
@@ -70,8 +70,8 @@ export async function readSession(request, secret) {
     if (!body || !signature || extra) return null;
     const expected = await hmac(body, secret);
     if (!constantTimeEqual(signature, expected)) return null;
-    const payload = JSON.parse(atobUrl(body));
-    if (!payload || typeof payload !== "object" || !payload.sub || !payload.exp || payload.exp < Math.floor(Date.now() / 1000)) return null;
+    const payload = JSON.parse(decodeSessionBody(body));
+    if (!payload || typeof payload !== "object" || typeof payload.sub !== "string" || !payload.sub || !Number.isFinite(payload.exp) || payload.exp <= Math.floor(Date.now() / 1000)) return null;
     return payload;
   } catch {
     return null;
@@ -79,7 +79,9 @@ export async function readSession(request, secret) {
 }
 
 async function signSession(payload, secret) {
-  const body = btoaUrl(JSON.stringify({ ...payload, exp: Math.floor(Date.now() / 1000) + 604800 }));
+  if (!secret) throw new Error("Session signing is not configured.");
+  const bytes = new TextEncoder().encode(JSON.stringify({ ...payload, exp: Math.floor(Date.now() / 1000) + 604800 }));
+  const body = btoaUrl(String.fromCharCode(...bytes));
   return `${body}.${await hmac(body, secret)}`;
 }
 
@@ -116,4 +118,81 @@ export function json(payload, status = 200, extraHeaders = {}) {
     status,
     headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store, private", ...extraHeaders },
   });
+}
+
+function decodeSessionBody(body) {
+  const binary = atobUrl(body);
+  try {
+    return new TextDecoder("utf-8", { fatal: true }).decode(Uint8Array.from(binary, (c) => c.charCodeAt(0)));
+  } catch {
+    // Compatibility with pre-existing Latin-1 sessions.
+    return binary;
+  }
+}
+
+export class AuthError extends Error {
+  constructor(code, status, message) {
+    super(message);
+    this.name = "AuthError";
+    this.code = code;
+    this.status = status;
+  }
+}
+
+export const USERS_SCHEMA = `CREATE TABLE IF NOT EXISTS users (
+  id TEXT PRIMARY KEY, email TEXT NOT NULL, display_name TEXT NOT NULL DEFAULT '',
+  picture_url TEXT NOT NULL DEFAULT '', provider TEXT NOT NULL DEFAULT 'google',
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, last_login_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  account_status TEXT NOT NULL DEFAULT 'active', accepted_terms_at TEXT, onboarding_completed_at TEXT
+)`;
+
+export async function readActiveSession(request, env = {}) {
+  const config = authConfig(env, request);
+  const session = await readSession(request, config.cookieSecret);
+  if (!session) return null;
+  const db = getJobDb(env);
+  if (!db) throw new AuthError("STORAGE_NOT_CONFIGURED", 503, "Account storage is unavailable.");
+  let account;
+  try {
+    account = await db.prepare(
+      "SELECT id, email, display_name, picture_url, account_status, created_at, last_login_at, accepted_terms_at, onboarding_completed_at FROM users WHERE id = ?",
+    ).bind(session.sub).first();
+  } catch {
+    throw new AuthError("ACCOUNT_STORAGE_UNAVAILABLE", 503, "Account verification is temporarily unavailable.");
+  }
+  if (!account) throw new AuthError("AUTH_REQUIRED", 401, "Sign in again to verify your account.");
+  if (account.account_status !== "active") throw new AuthError("ACCOUNT_RESTRICTED", 403, "This account is restricted.");
+  return {
+    session: { ...session, email: account.email, name: account.display_name, picture: account.picture_url, account_status: account.account_status },
+    account,
+  };
+}
+
+export function safeReturnPath(value) {
+  if (typeof value !== "string" || !value.startsWith("/") || value.startsWith("//") || value.length > 160) return "";
+  if (/[\\\u0000-\u0020\u007f]/.test(value)) return "";
+  let decoded;
+  try { decoded = decodeURIComponent(value); } catch { return ""; }
+  if (decoded.startsWith("//") || /[\\\u0000-\u0020\u007f]/.test(decoded)) return "";
+  const resolved = new URL(value, "https://jobs.wasfai.com");
+  return resolved.origin === "https://jobs.wasfai.com" ? value : "";
+}
+
+export function pkceCookie(value) {
+  return "jobs_oauth_pkce=" + encodeURIComponent(value) + "; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=600";
+}
+
+export function clearPkceCookie() {
+  return "jobs_oauth_pkce=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0";
+}
+
+export function oauthCleanupHeaders() {
+  const headers = new Headers({ "Cache-Control": "no-store, private", "Referrer-Policy": "no-referrer" });
+  for (const cookie of [clearStateCookie(), clearReturnCookie(), clearTermsCookie(), clearPkceCookie()]) headers.append("Set-Cookie", cookie);
+  return headers;
+}
+
+export async function pkceChallenge(verifier) {
+  const bytes = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier));
+  return btoaUrl(String.fromCharCode(...new Uint8Array(bytes)));
 }

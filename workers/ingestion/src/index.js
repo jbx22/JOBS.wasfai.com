@@ -34,23 +34,23 @@ export default {
       return json({ ok: true, service: "jobs-wasfai-ingestion", at: new Date().toISOString() });
     }
     if (url.pathname === "/sources" && request.method === "GET") {
-      const { results } = await getJobDb(env).prepare("SELECT * FROM sources ORDER BY label").all();
+      const { results } = await getJobDb(env).prepare("SELECT id, label, url, region, connector_mode, last_scanned_at, next_scan_at, last_error FROM sources WHERE visibility = 'central' AND owner_user_id = '' AND enabled = 1 ORDER BY label").all();
       return json({ ok: true, sources: results.map(withSourceQuality) });
     }
     if (url.pathname === "/jobs" && request.method === "GET") {
-      const limit = Math.min(Number(url.searchParams.get("limit") || 50), 100);
+      const limit = Math.max(1, Math.min(Math.floor(Number(url.searchParams.get("limit")) || 50), 100));
       const { results } = await getJobDb(env).prepare(
-        "SELECT * FROM jobs WHERE verification_status = 'live' AND closed_at = '' AND (valid_through = '' OR valid_through >= ?1) ORDER BY score DESC, discovered_at DESC LIMIT ?2",
-      ).bind(new Date().toISOString(), limit).all();
+        "SELECT j.* FROM jobs j JOIN sources s ON s.id = j.source_id WHERE s.visibility = 'central' AND s.owner_user_id = '' AND s.enabled = 1 AND j.verification_status = 'live' AND j.closed_at = '' AND (j.valid_through = '' OR j.valid_through >= ?1) AND j.last_verified_at >= ?2 ORDER BY score DESC, discovered_at DESC LIMIT ?3",
+      ).bind(new Date().toISOString(), new Date(Date.now() - 7 * 86400000).toISOString(), limit).all();
       return json({ ok: true, jobs: results.filter(isLikelyStoredJob).map((job) => ({ ...job, data_quality: "live_verified", source_quality: "live_verified" })) });
     }
     if (url.pathname === "/match" && request.method === "POST") {
       const body = await request.json().catch(() => ({}));
-      const limit = Math.min(Number(body.limit || 50), 100);
+      const limit = Math.max(1, Math.min(Math.floor(Number(body.limit) || 50), 100));
       const profile = normalizeProfile(body.profile || {});
       const { results } = await getJobDb(env).prepare(
-        "SELECT * FROM jobs WHERE verification_status = 'live' AND closed_at = '' AND (valid_through = '' OR valid_through >= ?1) ORDER BY discovered_at DESC LIMIT 300",
-      ).bind(new Date().toISOString()).all();
+        "SELECT j.* FROM jobs j JOIN sources s ON s.id = j.source_id WHERE s.visibility = 'central' AND s.owner_user_id = '' AND s.enabled = 1 AND j.verification_status = 'live' AND j.closed_at = '' AND (j.valid_through = '' OR j.valid_through >= ?1) AND j.last_verified_at >= ?2 ORDER BY discovered_at DESC LIMIT 300",
+      ).bind(new Date().toISOString(), new Date(Date.now() - 7 * 86400000).toISOString()).all();
       const jobs = results
         .filter(isLikelyStoredJob)
         .map((job) => matchJob(job, profile))
@@ -361,7 +361,7 @@ function isBlockedTitle(title) {
   ].some((pattern) => pattern.test(String(title || "")));
 }
 
-function normalizeProfile(profile) {
+export function normalizeProfile(profile) {
   const terms = [
     ...splitTerms(profile.target_roles),
     ...splitTerms(profile.resume_skills),
@@ -382,7 +382,7 @@ function normalizeProfile(profile) {
   };
 }
 
-function matchJob(job, profile) {
+export function matchJob(job, profile) {
   const haystack = `${job.title} ${job.employer} ${job.location} ${job.description}`.toLowerCase();
   const title = String(job.title || "").toLowerCase();
   const location = String(job.location || "").toLowerCase();

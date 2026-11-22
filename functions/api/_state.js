@@ -1,4 +1,4 @@
-import { authConfig, readSession } from "./auth/_auth.js";
+import { readActiveSession } from "./auth/_auth.js";
 import { buildBootstrap } from "./bootstrap.js";
 import { getJobDb } from "./_db.js";
 
@@ -51,9 +51,8 @@ const STATE_KEYS = [
 ];
 
 export async function getAuthenticatedUser(context) {
-  const config = authConfig(context.env || {}, context.request);
-  const session = await readSession(context.request, config.cookieSecret);
-  return session || null;
+  const active = await readActiveSession(context.request, context.env || {});
+  return active?.session || null;
 }
 
 export async function requireAuthenticatedState(context) {

@@ -1,0 +1,292 @@
+{
+  "current": 59,
+  "lastDescription": "Repair Google OAuth and durable account restrictions; add moderated employer recruitment, private applications, verified public job pages and sitemaps; enforce admin scopes and idempotent payment activation.",
+  "lastAt": "2026-11-22",
+  "history": [
+    {
+      "n": 1,
+      "description": "Initial MENA job-search command center PWA prototype: Arabic-first RTL mobile UI, 5-tab bottom nav (البحث/الوظائف/الإعدادات/الحساب/النتيجة), multi-select + bulk-move, sources + فحص تلقائي with Rust background worker, JSON-LD/HTML live connectors (WUZZUF, Bayt, Khamsat, generic), approved-API guard for LinkedIn/Indeed, 52-test green cargo test --lib",
+      "at": "2026-07-11 00:12"
+    },
+    {
+      "n": 2,
+      "description": "Add voice-dna.md, DATA_CONTRACT.md, tools/check-contract.mjs (system/user boundary + voice guardrail)",
+      "at": "2026-07-11 01:37"
+    },
+    {
+      "n": 3,
+      "description": "Launch Cloudflare Pages production with Functions bootstrap API, deployment handoff, and jobs.wasfai.com custom-domain setup",
+      "at": "2026-07-11 02:14"
+    },
+    {
+      "n": 4,
+      "description": "Mobile-first responsive PWA polish with desktop layout fix, install icons, and upgraded offline cache",
+      "at": "2026-07-11 02:54"
+    },
+    {
+      "n": 5,
+      "description": "Finalize jobs.wasfai.com active custom-domain handoff after DNS verification",
+      "at": "2026-07-11 02:56"
+    },
+    {
+      "n": 6,
+      "description": "Add production ghost writer for bilingual resume, cover letter, and interview preparation kits",
+      "at": "2026-07-11 03:32"
+    },
+    {
+      "n": 7,
+      "description": "Set DeepSeek V4 Flash as default ghost writer AI provider",
+      "at": "2026-07-11 05:14"
+    },
+    {
+      "n": 8,
+      "description": "Ignore user-owned data paths and finalize DeepSeek ghost writer defaults",
+      "at": "2026-07-11 05:15"
+    },
+    {
+      "n": 9,
+      "description": "Add subscriber original resume editor, friendly how-it-works guidance, and deeper ghostwriter resume output",
+      "at": "2026-07-13 04:05"
+    },
+    {
+      "n": 10,
+      "description": "Add Cloudflare ingestion worker, AI Writer model selection, approved DOCX/PDF exports, and interactive interview prep",
+      "at": "2026-07-13 04:42"
+    },
+    {
+      "n": 11,
+      "description": "Route MiniMax GLM and Kimi AI Writer models through OpenRouter",
+      "at": "2026-07-13 05:42"
+    },
+    {
+      "n": 12,
+      "description": "Harden OpenRouter AI Writer JSON parsing",
+      "at": "2026-07-13 05:50"
+    },
+    {
+      "n": 13,
+      "description": "Add resume-first AI coach workflow and remove Kimi model",
+      "at": "2026-07-13 06:17"
+    },
+    {
+      "n": 14,
+      "description": "Implement resume-approved live job matching and clean crawler filters",
+      "at": "2026-07-13 07:44"
+    },
+    {
+      "n": 15,
+      "description": "Tighten live crawler category filters after match smoke",
+      "at": "2026-07-13 07:47"
+    },
+    {
+      "n": 16,
+      "description": "Add KV crawler cache and Google OAuth account foundation",
+      "at": "2026-07-13 09:29"
+    },
+    {
+      "n": 17,
+      "description": "Add assisted apply package CTA and follow-up tracker",
+      "at": "2026-07-13 09:55"
+    },
+    {
+      "n": 18,
+      "description": "Mobile command home, authenticated D1 workspace persistence, source workflow, export validation, production QA",
+      "at": "2026-07-14 05:00"
+    },
+    {
+      "n": 19,
+      "description": "Arabic-default landing, English switcher, and day-night theme toggle",
+      "at": "2026-07-14 05:13"
+    },
+    {
+      "n": 20,
+      "description": "Scope production QA to live qa folder after Arabic theme tests",
+      "at": "2026-07-14 05:15"
+    },
+    {
+      "n": 21,
+      "description": "Add uploaded JOBS logo and PWA install icon assets",
+      "at": "2026-07-14 05:24"
+    },
+    {
+      "n": 22,
+      "description": "pre-change rollback before resume-first journey and logo sizing fixes",
+      "at": "2026-07-14 06:07"
+    },
+    {
+      "n": 23,
+      "description": "resume-first mobile journey with bigger logo, PDF upload, hidden source preview, and relevance-only jobs",
+      "at": "2026-07-14 06:14"
+    },
+    {
+      "n": 24,
+      "description": "pre-fix rollback before making buttons, AI, find-jobs, and resume upload reliable",
+      "at": "2026-07-14 06:45"
+    },
+    {
+      "n": 25,
+      "description": "fix resume upload journey, find-jobs proxy and fallback, guest buttons, AI package visibility, and side-menu workflow",
+      "at": "2026-07-14 06:55"
+    },
+    {
+      "n": 26,
+      "description": "finalize AI timeout fallback for responsive website journey",
+      "at": "2026-07-14 06:59"
+    },
+    {
+      "n": 27,
+      "description": "add browser-side AI fallback so package generation never hangs",
+      "at": "2026-07-14 07:02"
+    },
+    {
+      "n": 28,
+      "description": "pre-fix rollback before Arabic resume and AI assumption cleanup",
+      "at": "2026-07-14 09:20"
+    },
+    {
+      "n": 29,
+      "description": "Arabic-first resume journey, remove IT/Rust assumptions, safer PDF resume extraction",
+      "at": "2026-07-14 09:33"
+    },
+    {
+      "n": 30,
+      "description": "Add Arabic-English browser OCR for scanned resume PDFs and replace stale UI QA wiring",
+      "at": "2026-07-14 11:36"
+    },
+    {
+      "n": 31,
+      "description": "Wire authenticated source scans to live ingestion worker results instead of placeholder jobs",
+      "at": "2026-07-14 11:47"
+    },
+    {
+      "n": 32,
+      "description": "Add verified Saudi government and regional job portals with direct portal access",
+      "at": "2026-07-14 11:57"
+    },
+    {
+      "n": 33,
+      "description": "Stabilize production OAuth redirect QA without following the external Google redirect",
+      "at": "2026-07-14 11:58"
+    },
+    {
+      "n": 34,
+      "description": "Add official Saudi enterprise career portals for Aramco SABIC stc PIF NEOM Maaden and SAB",
+      "at": "2026-07-14 12:37"
+    },
+    {
+      "n": 35,
+      "description": "Add durable application tracker follow-up queue and safe partial job updates",
+      "at": "2026-07-14 12:46"
+    },
+    {
+      "n": 36,
+      "description": "Make subscriber AI workflow editable with approved bilingual master resumes, per-job tailoring briefs, editable application documents, durable state, and mock interview coaching",
+      "at": "2026-07-14 13:00"
+    },
+    {
+      "n": 37,
+      "description": "Use the approved editable master resume in the browser AI fallback",
+      "at": "2026-07-14 13:03"
+    },
+    {
+      "n": 38,
+      "description": "Fix Arabic resume upload and account localization",
+      "at": "2026-07-14 13:23"
+    },
+    {
+      "n": 39,
+      "description": "Enforce English application-kit output",
+      "at": "2026-07-14 13:42"
+    },
+    {
+      "n": 40,
+      "description": "Refresh PWA cache for English kit fix",
+      "at": "2026-07-14 13:43"
+    },
+    {
+      "n": 41,
+      "description": "Production Typst Arabic PDF container, protected DeepSeek health proof, normalized revisioned D1 state, and verified live Remotive feed",
+      "at": "2026-07-14 18:02"
+    },
+    {
+      "n": 42,
+      "description": "Harden live ingestion and KV cache, evidence-based matching, liveness and ATS review gates, offline PWA, incremental domain storage, metrics, and authenticated release QA",
+      "at": "2026-07-14 20:18"
+    },
+    {
+      "n": 43,
+      "description": "Production security hardening: same-origin API enforcement, request limits, safer sessions, stronger browser isolation and cache headers, and crawler/security metadata",
+      "at": "2026-07-14 20:41"
+    },
+    {
+      "n": 44,
+      "description": "Fix RTL sidebar branding, responsive overflow safeguards, and adaptive PWA orientation",
+      "at": "2026-07-23 18:16"
+    },
+    {
+      "n": 45,
+      "description": "Add mobile account menu, dedicated Google signup, durable user records, consent, onboarding, and authenticated production QA",
+      "at": "2026-07-23 18:51"
+    },
+    {
+      "n": 46,
+      "description": "Finalize Google onboarding and QA release gate; extend AI provider timeout after production audit",
+      "at": "2026-07-23 18:57"
+    },
+    {
+      "n": 47,
+      "description": "Fix inward-opening account menu, restore header language and theme controls, and refresh verified DeepSeek V4 Flash production key",
+      "at": "2026-07-23 19:16"
+    },
+    {
+      "n": 48,
+      "description": "Refresh PWA cache for corrected header controls and account menu",
+      "at": "2026-07-23 19:17"
+    },
+    {
+      "n": 49,
+      "description": "Make DeepSeek V4 Flash generation resilient when second-pass review is unavailable",
+      "at": "2026-07-23 19:20"
+    },
+    {
+      "n": 50,
+      "description": "Finalize verified DeepSeek V4 Flash production QA and factual-review export gate diagnostics",
+      "at": "2026-07-23 19:22"
+    },
+    {
+      "n": 51,
+      "description": "Add private encrypted D1 and R2 resume file storage with validated upload, download, replacement, and deletion",
+      "at": "2026-07-23 19:38"
+    },
+    {
+      "n": 52,
+      "description": "Add secure Moyasar checkout, subscription activation, payment webhooks, and Billing & Moyasar admin console",
+      "at": "2026-07-23 21:27"
+    },
+    {
+      "n": 53,
+      "description": "Add server-only SAdmin service credential path to the admin API for reads and audited writes",
+      "at": "2026-09-11 22:43"
+    },
+    {
+      "n": 54,
+      "description": "Migrate production relational data and server API storage from Cloudflare D1 (JOBS_DB) to the dedicated VPS PostgreSQL database via a token-authenticated server-side gateway; R2 RESUME_FILES retained",
+      "at": "2026-09-12 23:31"
+    },
+    {
+      "n": 55,
+      "description": "Portability fixes for the PostgreSQL backend: explicit GROUP BY for the admin subscriber roll-up and a gateway statement allowlist (DML + idempotent CREATE TABLE/INDEX only)",
+      "at": "2026-09-12 23:41"
+    },
+    {
+      "n": 58,
+      "description": "Add a first-class public release marker: functions/api/version.js publishes the JOBS_RELEASE constant (jobs58) at GET /api/version with an x-jobs-release header, replacing reliance on the service worker CACHE_NAME as the only deployed release identity",
+      "at": "2026-09-14 00:25"
+    },
+    {
+      "n": 59,
+      "description": "Repair Google OAuth and durable account restrictions; add moderated employer recruitment, private applications, verified public job pages and sitemaps; enforce admin scopes and idempotent payment activation.",
+      "at": "2026-11-22"
+    }
+  ]
+}

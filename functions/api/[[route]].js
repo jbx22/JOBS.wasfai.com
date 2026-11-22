@@ -1,3 +1,4 @@
+import { matchPublicJobs } from "./_public_jobs.js";
 import {
   json,
   noContent,
@@ -63,22 +64,10 @@ async function jobsMatch(context) {
   const body = await readBody(context);
   const access = await requireAuthenticatedState(context);
   if (access.error) return access.error;
-  const profile = body.profile || {};
-  const limit = Math.min(Number(body.limit || 40), 80);
-  const upstream = String(context.env.JOBS_INGESTION_URL || "https://jobs-wasfai-ingestion.jabosaag.workers.dev").replace(/\/+$/, "");
   try {
-    const response = await fetch(`${upstream}/match`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ profile, limit }),
-    });
-    if (response.ok) {
-      const payload = await response.json();
-      return json({ ...payload, source: "ingestion-worker" });
-    }
-    return json({ ok: false, jobs: [], matched: 0, source: "ingestion-worker", error: `match returned ${response.status}` }, 200);
-  } catch (error) {
-    return json({ ok: false, jobs: [], matched: 0, source: "ingestion-worker", error: error?.message || "match failed" }, 200);
+    return json(await matchPublicJobs(context.env, body.profile || {}, body.limit));
+  } catch {
+    return json({ ok: false, jobs: [], matched: 0, error: "Job matching is temporarily unavailable.", code: "MATCH_UNAVAILABLE" }, 503);
   }
 }
 

@@ -105,6 +105,7 @@ function render() {
           <div><h1>${pageTitle()}</h1><p>${esc(state.admin.email)} - ${esc(state.admin.role.replace("_", " "))}</p></div>
           <div class="admin-actions">
             ${mode !== "super" && state.admin.role === "super_admin" ? `<a class="btn blue" href="/super-admin/">Super Admin</a>` : ""}
+            <a class="btn" href="/recruitment-admin">Recruitment</a>
             <a class="btn" href="/app">Website</a>
             <button class="btn ghost" data-refresh>Refresh</button>
           </div>

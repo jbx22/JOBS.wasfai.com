@@ -1,0 +1,39 @@
+name: JOBS checks
+on:
+  pull_request:
+  push:
+    branches: [main, "codex/**"]
+permissions:
+  contents: read
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: jobs_test
+          POSTGRES_PASSWORD: jobs_test_only
+          POSTGRES_DB: jobs_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U jobs_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      JOBS_TEST_PG_URL: postgres://jobs_test:jobs_test_only@127.0.0.1:5432/jobs_test
+      WRANGLER_SEND_METRICS: "false"
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: "24"
+          cache: npm
+      - run: npm ci
+      - run: npm install --prefix vps/db-gateway --ignore-scripts --no-audit --no-fund
+      - run: npm run check:all
+      - run: node --test vps/db-gateway/test/sql.test.mjs
+      - name: Compile Pages Functions
+        run: npx wrangler pages functions build functions --outdir .ci-build --compatibility-date 2026-07-11 --compatibility-flags nodejs_compat

@@ -1,0 +1,26 @@
+/*
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+  X-Frame-Options: DENY
+  Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=(), usb=()
+  Strict-Transport-Security: max-age=31536000; includeSubDomains; preload
+  Cross-Origin-Opener-Policy: same-origin
+  Cross-Origin-Resource-Policy: same-origin
+  Origin-Agent-Cluster: ?1
+  X-DNS-Prefetch-Control: off
+  Content-Security-Policy: default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' https://jobs-wasfai-ingestion.jabosaag.workers.dev https://cdnjs.cloudflare.com https://cdn.jsdelivr.net; worker-src 'self' blob: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net; manifest-src 'self'
+
+/api/*
+  Cache-Control: no-store, private
+
+/sw.js
+  Cache-Control: no-cache, no-store, must-revalidate
+
+/app.js
+  Cache-Control: no-cache, must-revalidate
+
+/styles.css
+  Cache-Control: no-cache, must-revalidate
+
+/*.png
+  Cache-Control: public, max-age=604800
