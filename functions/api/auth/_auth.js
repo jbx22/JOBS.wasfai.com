@@ -7,8 +7,15 @@ export function authConfig(env, request) {
   const url = new URL(request.url);
   const configuredOrigin = String(env.AUTH_REDIRECT_ORIGIN || "").replace(/\/+$/, "");
   const productionOrigin = "https://jobs.wasfai.com";
+  const hostname = url.hostname.toLowerCase();
+  // Cloudflare Pages production and preview hostnames must use the one
+  // Google-authorized callback origin. Preview OAuth starts are redirected
+  // to the canonical host before setting any host-bound state cookie.
+  const deployedHost = hostname === "jobs.wasfai.com"
+    || hostname === "jobs-wasfai.pages.dev"
+    || hostname.endsWith(".jobs-wasfai.pages.dev");
   return {
-    origin: configuredOrigin || (env.ENVIRONMENT === "production" ? productionOrigin : url.origin),
+    origin: deployedHost ? productionOrigin : (configuredOrigin || (env.ENVIRONMENT === "production" ? productionOrigin : url.origin)),
     clientId: env.GOOGLE_CLIENT_ID || "",
     clientSecret: env.GOOGLE_CLIENT_SECRET || "",
     cookieSecret: env.AUTH_COOKIE_SECRET || "",

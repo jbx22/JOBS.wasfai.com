@@ -37,6 +37,30 @@ export default {
       const { results } = await getJobDb(env).prepare("SELECT * FROM sources ORDER BY label").all();
       return json({ ok: true, sources: results.map(withSourceQuality) });
     }
+    if (url.pathname.startsWith("/jobs/") && request.method === "GET") {
+      // Only public, live, unexpired postings may be served to search engines.
+      let id = "";
+      try { id = decodeURIComponent(url.pathname.slice("/jobs/".length)); } catch { return json({ ok: false, error: "invalid id" }, 400); }
+      if (!id || id.length > 180 || id.includes("/")) return json({ ok: false, error: "invalid id" }, 400);
+      const job = await getJobDb(env).prepare(
+        "SELECT * FROM jobs WHERE id = ?1 AND verification_status = 'live' AND closed_at = '' AND (valid_through = '' OR valid_through >= ?2) LIMIT 1",
+      ).bind(id, new Date().toISOString()).first();
+      if (!job || !isLikelyStoredJob(job)) return json({ ok: false, error: "job unavailable" }, 404);
+      return json({
+        ok: true,
+        job: {
+          id: job.id,
+          title: job.title,
+          employer: job.employer,
+          location: job.location,
+          description: job.description,
+          source_url: job.source_url,
+          published_at: job.posted_at || null,
+          valid_through: job.valid_through || null,
+          verification_status: job.verification_status,
+        },
+      });
+    }
     if (url.pathname === "/jobs" && request.method === "GET") {
       const limit = Math.min(Number(url.searchParams.get("limit") || 50), 100);
       const { results } = await getJobDb(env).prepare(

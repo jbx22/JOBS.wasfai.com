@@ -3,8 +3,20 @@ import { authConfig, json, returnCookie, stateCookie, termsCookie } from "../_au
 export async function onRequestGet(context) {
   const config = authConfig(context.env || {}, context.request);
   const requestUrl = new URL(context.request.url);
-  if (!config.clientId) {
-    return json({ error: "Google OAuth is not configured.", code: "GOOGLE_OAUTH_NOT_CONFIGURED" }, 503);
+  const hostname = requestUrl.hostname.toLowerCase();
+  if (hostname === "jobs-wasfai.pages.dev" || hostname.endsWith(".jobs-wasfai.pages.dev")) {
+    // Start on the same host that will receive the Google callback; otherwise
+    // the short-lived state cookie is lost when Google redirects to production.
+    return new Response(null, {
+      status: 302,
+      headers: {
+        Location: `https://jobs.wasfai.com${requestUrl.pathname}${requestUrl.search}`,
+        "Cache-Control": "no-store",
+      },
+    });
+  }
+  if (!config.clientId || !config.clientSecret || !config.cookieSecret) {
+    return json({ error: "Google sign-in is not fully configured.", code: "GOOGLE_OAUTH_NOT_CONFIGURED" }, 503);
   }
   const state = crypto.randomUUID();
   const redirectUri = `${config.origin}/api/auth/google/callback`;
