@@ -249,3 +249,6 @@
 ## jobs65 — 2026-11-22 20:07
 
 - Use bounded form-encoded requests for Google sign-in
+## jobs66 — 2026-11-22 20:33
+
+- Let Google reuse an existing sign-in session

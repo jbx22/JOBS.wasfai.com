@@ -52,6 +52,8 @@ test("OAuth start pins callback origin, sets PKCE and clears stale consent and r
   const target = new URL(response.headers.get("Location"));
   assert.equal(target.searchParams.get("redirect_uri"), "https://jobs.wasfai.com/api/auth/google/callback");
   assert.equal(target.searchParams.get("code_challenge_method"), "S256");
+  assert.equal(target.searchParams.has("prompt"), false);
+  assert.equal(target.searchParams.has("max_age"), false);
   const cookies = response.headers.getSetCookie();
   const pkce = decodeURIComponent(cookies.find((c) => c.startsWith("jobs_oauth_pkce=")).split(";")[0].split("=")[1]);
   assert.equal(target.searchParams.get("code_challenge"), await pkceChallenge(pkce));
