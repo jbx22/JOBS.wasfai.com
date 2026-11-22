@@ -4,6 +4,7 @@ Sequential snapshots of the project. Each version is a frozen copy of the source
 
 | Version | Date | Description |
 | --- | --- | --- |
+| jobs70 | 2026-11-22 22:10 | Use Career-Ops employer ingestion for Saudi vacancies and restore the HiringCafe portal link |
 | jobs69 | 2026-11-22 21:40 | Ingest official Saudi government vacancies and improve job-feed reliability |
 | jobs68 | 2026-11-22 21:20 | Ground job-specific résumés and letters in requirement evidence |
 | jobs67 | 2026-11-22 20:58 | Repair résumé coaching and upgrade to DeepSeek V4.1 Flash |

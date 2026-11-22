@@ -1,7 +1,7 @@
 {
-  "current": 69,
-  "lastDescription": "Ingest official Saudi government vacancies and improve job-feed reliability",
-  "lastAt": "2026-11-22 21:40",
+  "current": 70,
+  "lastDescription": "Use Career-Ops employer ingestion for Saudi vacancies and restore the HiringCafe portal link",
+  "lastAt": "2026-11-22 22:10",
   "history": [
     {
       "n": 1,
@@ -337,6 +337,11 @@
       "n": 69,
       "description": "Ingest official Saudi government vacancies and improve job-feed reliability",
       "at": "2026-11-22 21:40"
+    },
+    {
+      "n": 70,
+      "description": "Use Career-Ops employer ingestion for Saudi vacancies and restore the HiringCafe portal link",
+      "at": "2026-11-22 22:10"
     }
   ]
 }

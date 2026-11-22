@@ -39,3 +39,7 @@ wrangler secret put INGESTION_ADMIN_TOKEN --config workers/ingestion/wrangler.js
 The official Saudi government connector scans the public career sitemaps of ZATCA, EXPRO, SAMA, and MISA. Each listing stores the role, agency, location, dates when published, and the official link where candidates can read the full posting and apply. The government connector is available to the centrally configured sources.
 
 Jadarat is available as a direct link in the vacancy directory. Integrations for LinkedIn, Indeed, and services requiring credentials use approved APIs.
+
+The Saudi SmartRecruiters connector adapts the [Career-Ops provider](https://github.com/career-ops-hq/career-ops/blob/9d61e5a457d575cb57372aca116650933f32809e/providers/smartrecruiters.mjs) under the included MIT notice. It reads public Saudi listings from AECOM, Egis, Assystem, SGS, and Accor via the documented Posting API, paginates by offset, and stores vacancy facts and official application links.
+
+HiringCafe appears as a direct portal in the source catalog. Its former scheduled HTML scan is retired.
