@@ -5,7 +5,7 @@ import { webcrypto } from "node:crypto";
 import { onRequestGet as start } from "../functions/api/auth/google/start.js";
 import { onRequestGet as callback } from "../functions/api/auth/google/callback.js";
 import { getAuthenticatedUser } from "../functions/api/_state.js";
-import { sessionCookie } from "../functions/api/auth/_auth.js";
+import { readSession, sessionCookie } from "../functions/api/auth/_auth.js";
 
 if (!globalThis.crypto) globalThis.crypto = webcrypto;
 
@@ -107,4 +107,11 @@ test("OAuth callback never reactivates the account in the on-conflict update", (
   const source = readFileSync(new URL("../functions/api/auth/google/callback.js", import.meta.url), "utf8");
   assert.match(source, /ON CONFLICT\(id\) DO UPDATE SET/);
   assert.doesNotMatch(source, /last_login_at=CURRENT_TIMESTAMP,\s*account_status='active'/);
+});
+
+test("malformed unrelated cookies do not invalidate a valid signed session", async () => {
+  const cookie = (await sessionCookie({ sub: "google-sub-123" }, env.AUTH_COOKIE_SECRET)).split(";")[0];
+  const req = new Request("https://jobs.wasfai.com/api/auth/session", { headers: { Cookie: `unrelated=%E0%A4%A; ${cookie}` } });
+  const session = await readSession(req, env.AUTH_COOKIE_SECRET);
+  assert.equal(session?.sub, "google-sub-123");
 });
