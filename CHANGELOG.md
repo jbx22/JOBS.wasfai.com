@@ -231,3 +231,6 @@
 - Repair Google OAuth and durable account restrictions; add moderated employer recruitment, private applications, verified public job pages and sitemaps; enforce admin scopes and idempotent payment activation.
 - Retain shared application CVs when a candidate uploads a newer CV; keep the existing Pages, VPS PostgreSQL gateway and encrypted R2 store.
 - Add regression coverage and CI with PostgreSQL 16; rollout instructions are in docs/RELEASE-JOBS59.md.
+## jobs60 — 2026-11-22 18:04
+
+- Add employer job feeds, evidence-based fit evaluation, vacancy import, screening and recruiter drafts, and follow-up calendar export.

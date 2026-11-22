@@ -1,4 +1,5 @@
 import { getJobDb } from "./_db.js";
+import { ensureEmployerBoards, SOURCE_CONNECTORS } from "./boards.js";
 /**
  * JOBS.wasfai.com ingestion worker
  *
@@ -15,12 +16,14 @@ export default {
   async queue(batch, env) {
     for (const message of batch.messages) {
       try {
-        await scanSource(env, message.body);
+        const id = message.body?.id;
+        const source = typeof id === "string" && id ? await sourceById(env, id) : null;
+        const due = source?.enabled && (!source.next_scan_at || source.next_scan_at <= new Date().toISOString());
+        if (source && (message.body.force === true || due)) await scanSource(env, source);
         message.ack();
       } catch (error) {
         await recordSourceError(env, message.body?.id, error);
-        if (/timeout|\b5\d\d\b|network|temporar/i.test(errorMessage(error))) message.retry({ delaySeconds: 900 });
-        else message.ack();
+        message.ack();
       }
     }
   },
@@ -71,17 +74,22 @@ export default {
       const body = await request.json().catch(() => ({}));
       const id = String(body.id || "");
       const source = id ? await sourceById(env, id) : null;
-      if (!source) return json({ ok: false, error: "source not found" }, 404);
+      if (!source || (source.visibility === "private" && source.owner_user_id !== body.owner_user_id)) {
+        return json({ ok: false, error: "source not found" }, 404);
+      }
       if (url.searchParams.get("mode") === "direct") {
         try {
           const result = await scanSource(env, source);
-          return json({ ok: true, mode: "direct", result });
+          const { results: jobs = [] } = await getJobDb(env).prepare(
+            "SELECT * FROM jobs WHERE source_id = ? AND last_verified_at = ? AND closed_at = '' ORDER BY score DESC, id LIMIT 100",
+          ).bind(source.id, result.scanned_at).all();
+          return json({ ok: true, mode: "direct", result, jobs });
         } catch (error) {
           await recordSourceError(env, source.id, error);
           return json({ ok: false, mode: "direct", error: errorMessage(error) }, 502);
         }
       }
-      await env.JOBS_SCAN_QUEUE.send(source);
+      await env.JOBS_SCAN_QUEUE.send({ id: source.id, force: true });
       return json({ ok: true, queued: source.id });
     }
     if (url.pathname === "/admin/enqueue-due" && request.method === "POST") {
@@ -107,9 +115,11 @@ export default {
 };
 
 async function enqueueDueSources(env) {
+  const db = getJobDb(env);
+  await ensureEmployerBoards(db);
   const now = new Date().toISOString();
-  const { results } = await getJobDb(env).prepare(
-    "SELECT * FROM sources WHERE enabled = 1 AND (next_scan_at = '' OR next_scan_at <= ?1) LIMIT 20",
+  const { results } = await db.prepare(
+    "SELECT id FROM sources WHERE enabled = 1 AND (next_scan_at = '' OR next_scan_at <= ?1) ORDER BY next_scan_at, id LIMIT 20",
   ).bind(now).all();
   for (const source of results) {
     await env.JOBS_SCAN_QUEUE.send(source);
@@ -118,7 +128,7 @@ async function enqueueDueSources(env) {
 }
 
 async function scanSource(env, source) {
-  if (!source || !["public_html", "public_json", "greenhouse", "lever", "ashby"].includes(source.connector_mode)) {
+  if (!source || !SOURCE_CONNECTORS.includes(source.connector_mode)) {
     throw new Error("Unsupported connector mode.");
   }
   const payload = await fetchSourcePayload(env, source);
@@ -151,7 +161,7 @@ async function scanSource(env, source) {
   await archiveStaleJobs(env, source.id, now);
   await incrementMetric(env, "scan_success", source.id);
   await incrementMetric(env, "jobs_parsed", source.id, jobs.length);
-  return { scanned: source.id, parsed: jobs.length, inserted };
+  return { scanned: source.id, scanned_at: now, parsed: jobs.length, inserted };
 }
 
 async function fetchSourcePayload(env, source) {
@@ -177,12 +187,10 @@ async function fetchSourcePayload(env, source) {
   return html;
 }
 
-function parseSourcePayload(payload, source) {
-  if (source.connector_mode === "public_html") return parseJobs(payload, source);
-  if (source.connector_mode === "greenhouse") return parseGreenhouse(payload, source);
-  if (source.connector_mode === "lever") return parseLever(payload, source);
-  if (source.connector_mode === "ashby") return parseAshby(payload, source);
-  return parseJsonFeed(payload, source);
+export function parseSourcePayload(payload, source) {
+  const parsers = { public_html: parseJobs, public_json: parseJsonFeed, greenhouse: parseGreenhouse,
+    lever: parseLever, ashby: parseAshby, workable: parseWorkable };
+  return (parsers[source.connector_mode] || parseJsonFeed)(payload, source).filter((job) => safeHttpUrl(job.url));
 }
 
 function parseJsonFeed(text, source) {
@@ -203,10 +211,11 @@ function parseJsonFeed(text, source) {
 
 function parseGreenhouse(text, source) {
   const data = JSON.parse(text);
-  return uniqueJobs((data.jobs || []).map((row) => ({
+  if (!Array.isArray(data?.jobs)) throw new Error("Greenhouse response did not contain a job list");
+  return uniqueJobs(data.jobs.map((row) => ({
     title: clean(row.title), employer: source.label, location: clean(row.location?.name || source.region),
-    url: safeJobUrl(row.absolute_url, source.url), description: stripHtml(row.content || "").slice(0, 1200),
-    posted_at: isoDate(row.updated_at), valid_through: "", score: scoreJob(`${row.title} ${row.content || ""}`, source),
+    url: safeJobUrl(row.absolute_url, source.url), description: stripHtml(decodeHtml(row.content || "")).slice(0, 1200),
+    posted_at: isoDate(row.first_published), valid_through: "", score: scoreJob(`${row.title} ${row.content || ""}`, source),
   }))).filter(isLikelyParsedJob);
 }
 
@@ -222,7 +231,8 @@ function parseLever(text, source) {
 
 function parseAshby(text, source) {
   const data = JSON.parse(text);
-  return uniqueJobs((data.jobs || []).map((row) => ({
+  if (!Array.isArray(data?.jobs)) throw new Error("Ashby response did not contain a job list");
+  return uniqueJobs(data.jobs.filter((row) => row.isListed !== false).map((row) => ({
     title: clean(row.title), employer: source.label, location: clean(row.location || source.region),
     url: safeJobUrl(row.jobUrl || row.applyUrl, source.url), description: stripHtml(row.descriptionPlain || row.descriptionHtml || "").slice(0, 1200),
     posted_at: isoDate(row.publishedAt), valid_through: isoDate(row.validThrough),
@@ -230,8 +240,26 @@ function parseAshby(text, source) {
   }))).filter(isLikelyParsedJob);
 }
 
+function parseWorkable(text, source) {
+  const data = JSON.parse(text);
+  if (!Array.isArray(data?.jobs)) throw new Error("Workable response did not contain a job list");
+  return uniqueJobs(data.jobs.map((row) => {
+    const publishedLocations = Array.isArray(row.locations) ? row.locations.filter((item) => item && !item.hidden) : [];
+    const locations = publishedLocations.map(({ city, country }) => [city, country].filter(Boolean).join(", "));
+    const location = Array.isArray(row.locations) && row.locations.length
+      ? [...new Set(locations.filter(Boolean))].join("; ") : [row.city, row.country].filter(Boolean).join(", ");
+    return {
+      title: clean(row.title), employer: source.label, location: clean(location),
+      url: safeJobUrl(row.url || row.shortlink, source.url),
+      description: stripHtml(row.description || [row.department, row.employment_type, row.experience].filter(Boolean).join(" · ")).slice(0, 1200),
+      posted_at: isoDate(row.published_on), valid_through: "", score: scoreJob(`${row.title} ${location}`, source),
+    };
+  })).filter(isLikelyParsedJob);
+}
+
 function safeJobUrl(value, base) {
-  try { return new URL(String(value), base).toString(); } catch { return base; }
+  if (typeof value !== "string" || !value.trim()) return "";
+  try { return safeHttpUrl(new URL(value, base).toString()); } catch { return ""; }
 }
 
 function parseJobs(html, source) {
@@ -321,7 +349,7 @@ function uniqueJobs(jobs) {
 }
 
 function isLikelyParsedJob(job) {
-  if (!job || !job.title || job.title.length < 5) return false;
+  if (!job || !job.title || job.title.length < 3) return false;
   if (isBlockedTitle(job.title)) return false;
   const text = `${job.title} ${job.description || ""}`.toLowerCase();
   const roleWords = [
@@ -329,7 +357,7 @@ function isLikelyParsedJob(job) {
     "coordinator", "supervisor", "officer", "technician", "designer", "architect", "محاسب", "مهندس", "مدير",
   ];
   const hasRoleWord = roleWords.some((word) => text.includes(word));
-  const hasDetailUrl = /\/job|jobs\/[^/?#]+[-_]\d+|\/careers\//i.test(job.url || "");
+  const hasDetailUrl = /\/job|jobs\/[^/?#]+[-_]\d+|\/careers\/|^https:\/\/apply\.workable\.com\/j\/[a-z0-9]+/i.test(job.url || "");
   return hasRoleWord || hasDetailUrl || String(job.description || "").length > 180;
 }
 
@@ -361,6 +389,17 @@ function isBlockedTitle(title) {
   ].some((pattern) => pattern.test(String(title || "")));
 }
 
+const MATCH_ALIASES = [
+  ["riyadh", "الرياض"], ["jeddah", "جدة", "جده"], ["makkah", "mecca", "مكة"],
+  ["madinah", "medina", "المدينة"], ["dammam", "الدمام"], ["khobar", "الخبر"],
+  ["saudi arabia", "ksa", "السعودية", "riyadh", "jeddah", "dammam", "khobar", "makkah", "madinah", "الرياض", "جدة", "الدمام", "الخبر"],
+  ["gcc", "gulf", "الخليج", "saudi arabia", "united arab emirates", "qatar", "kuwait", "bahrain", "oman"],
+  ["mechanical engineer", "مهندس ميكانيكي", "مهندس ميكانيكا"],
+  ["project manager", "مدير مشروع", "مدير مشاريع", "مدير المشاريع"],
+  ["maintenance engineer", "مهندس صيانة"], ["accountant", "محاسب"],
+  ["data analyst", "محلل بيانات"], ["software engineer", "مهندس برمجيات"],
+];
+
 export function normalizeProfile(profile) {
   const terms = [
     ...splitTerms(profile.target_roles),
@@ -370,7 +409,7 @@ export function normalizeProfile(profile) {
     ...splitTerms(profile.target_locations),
     ...splitTerms(profile.resume_text).slice(0, 30),
   ].map((term) => term.toLowerCase()).filter((term, index, all) => term.length > 2 && all.indexOf(term) === index);
-  const locations = splitTerms(`${profile.target_locations || ""},${profile.resume_regions || ""}`).map((term) => term.toLowerCase());
+  const locations = splitPhrases(profile.target_locations || profile.resume_regions).map(lower);
   return {
     terms,
     roles: splitPhrases(profile.target_roles).map(lower),
@@ -386,21 +425,28 @@ export function matchJob(job, profile) {
   const haystack = `${job.title} ${job.employer} ${job.location} ${job.description}`.toLowerCase();
   const title = String(job.title || "").toLowerCase();
   const location = String(job.location || "").toLowerCase();
-  const roleHits = profile.roles.filter((term) => phraseMatch(title, term));
-  const skillHits = profile.skills.filter((term) => phraseMatch(haystack, term));
-  const locationHits = profile.locations.filter((term) => phraseMatch(location, term));
-  const seniorityHits = profile.seniority.filter((term) => phraseMatch(`${title} ${job.seniority || ""}`.toLowerCase(), term));
-  const sectorHits = profile.sectors.filter((term) => phraseMatch(`${haystack} ${job.sector || ""}`.toLowerCase(), term));
+  const titleWords = matchWords(title);
+  const descriptionWords = matchWords(haystack);
+  const locationWords = matchWords(location);
+  const seniorityWords = matchWords(`${title} ${job.seniority || ""}`);
+  const sectorWords = new Set([...descriptionWords, ...matchWords(job.sector)]);
+  const roleHits = profile.roles.filter((term) => matchWithAliases(titleWords, term));
+  const skillHits = profile.skills.filter((term) => phraseMatch(descriptionWords, term));
+  const locationHits = profile.locations.filter((term) => matchWithAliases(locationWords, term));
+  const seniorityHits = profile.seniority.filter((term) => phraseMatch(seniorityWords, term));
+  const sectorHits = profile.sectors.filter((term) => phraseMatch(sectorWords, term));
   const remoteCompatible = profile.allowRemote && /remote|anywhere|global|عن بعد/i.test(location);
   const hasRole = roleHits.length > 0;
   const hasLocation = !profile.locations.length || locationHits.length > 0 || remoteCompatible;
   const seniorityConflict = hasSeniorityConflict(title, profile.seniority);
-  let score = 0;
-  score += hasRole ? 36 : 0;
-  score += Math.min(25, skillHits.length * 5);
-  score += hasLocation ? 18 : 0;
-  score += seniorityHits.length || !profile.seniority.length ? 10 : 0;
-  score += Math.min(11, sectorHits.length * 4);
+  const dimensions = [
+    { key: "role", points: hasRole ? 36 : 0, maximum: 36, evidence: roleHits },
+    { key: "skills", points: Math.min(25, skillHits.length * 5), maximum: 25, evidence: skillHits },
+    { key: "location", points: hasLocation ? 18 : 0, maximum: 18, evidence: remoteCompatible && !locationHits.length ? ["remote"] : locationHits },
+    { key: "seniority", points: seniorityHits.length || !profile.seniority.length ? 10 : 0, maximum: 10, evidence: seniorityHits },
+    { key: "sector", points: Math.min(11, sectorHits.length * 4), maximum: 11, evidence: sectorHits },
+  ];
+  let score = dimensions.reduce((total, dimension) => total + dimension.points, 0);
   if (seniorityConflict) score -= 30;
   score = Math.max(0, Math.min(100, score));
   const missing = [!hasRole && "target role", !hasLocation && "target location", seniorityConflict && "compatible seniority"].filter(Boolean);
@@ -409,6 +455,8 @@ export function matchJob(job, profile) {
   return {
     ...job,
     score,
+    match_breakdown: dimensions,
+    fit_grade: !hasRole || !hasLocation || seniorityConflict ? "F" : score >= 85 ? "A" : score >= 75 ? "B" : score >= 65 ? "C" : score >= 50 ? "D" : "F",
     match_eligible: matchEligible,
     match_confidence: evidence.length >= 5 ? "high" : evidence.length >= 2 ? "medium" : "low",
     match_evidence: evidence,
@@ -420,14 +468,23 @@ export function matchJob(job, profile) {
 }
 
 function splitPhrases(value) {
-  return String(value || "").split(/[,;\n|]+/).map((item) => item.trim()).filter((item) => item.length > 2).slice(0, 30);
+  return String(value || "").split(/[,،;؛\n|]+/).map((item) => item.trim()).filter((item) => item.length > 2).slice(0, 30);
 }
 
 function lower(value) { return String(value || "").toLowerCase(); }
 
-function phraseMatch(text, phrase) {
+function matchWords(text) {
+  return new Set(lower(text).match(/[a-z0-9\u0600-\u06ff+#]+(?:\.[a-z0-9]+)*/g) || []);
+}
+
+function phraseMatch(words, phrase) {
   const terms = splitTerms(phrase);
-  return terms.length > 0 && terms.every((term) => text.includes(term.toLowerCase()));
+  return terms.length > 0 && terms.every((term) => words.has(lower(term)));
+}
+
+function matchWithAliases(text, phrase) {
+  const aliases = MATCH_ALIASES.find((group) => group.includes(phrase)) || [phrase];
+  return aliases.some((term) => phraseMatch(text, term));
 }
 
 function hasSeniorityConflict(title, desired) {
@@ -472,7 +529,7 @@ async function upsertManagedSource(env, input) {
   const region = clean(input.region).slice(0, 160);
   const query = clean(input.query).slice(0, 300);
   const interval = safeInterval(input.interval_minutes);
-  const connector = ["public_html", "public_json", "greenhouse", "lever", "ashby"].includes(input.connector_mode)
+  const connector = SOURCE_CONNECTORS.includes(input.connector_mode)
     ? input.connector_mode : "public_html";
   const enabled = input.scheduled === false || input.enabled === false ? 0 : 1;
   const now = new Date().toISOString();
@@ -480,20 +537,23 @@ async function upsertManagedSource(env, input) {
     `INSERT INTO sources (id, label, url, region, query, enabled, connector_mode, interval_minutes, next_scan_at, owner_user_id, visibility, created_at, updated_at)
      VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?11, ?7, ?8, ?9, 'private', ?10, ?10)
      ON CONFLICT(id) DO UPDATE SET label=excluded.label, url=excluded.url, region=excluded.region, query=excluded.query,
-       enabled=excluded.enabled, interval_minutes=excluded.interval_minutes, next_scan_at=excluded.next_scan_at, updated_at=excluded.updated_at`,
+       enabled=excluded.enabled, connector_mode=excluded.connector_mode, interval_minutes=excluded.interval_minutes, next_scan_at=excluded.next_scan_at, updated_at=excluded.updated_at
+     WHERE sources.visibility='private' AND sources.owner_user_id=excluded.owner_user_id`,
   ).bind(id, label, url, region, query, enabled, interval, enabled ? now : "", owner, now, connector).run();
-  return sourceById(env, id);
+  const saved = await sourceById(env, id);
+  if (saved?.visibility !== "private" || saved.owner_user_id !== owner) throw new Error("Source identifier is already in use.");
+  return saved;
 }
 
 async function updateManagedSource(env, id, input) {
   const existing = await sourceById(env, id);
-  if (!existing) return null;
+  if (existing?.visibility !== "private" || existing.owner_user_id !== input.owner_user_id) return null;
   const scheduled = input.scheduled !== undefined ? Boolean(input.scheduled) : Boolean(existing.enabled);
   const interval = safeInterval(input.interval_minutes || existing.interval_minutes);
   const next = scheduled ? new Date().toISOString() : "";
   await getJobDb(env).prepare(
-    "UPDATE sources SET enabled=?1, interval_minutes=?2, next_scan_at=?3, updated_at=?4 WHERE id=?5",
-  ).bind(scheduled ? 1 : 0, interval, next, new Date().toISOString(), id).run();
+    "UPDATE sources SET enabled=?1, interval_minutes=?2, next_scan_at=?3, updated_at=?4 WHERE id=?5 AND owner_user_id=?6 AND visibility='private'",
+  ).bind(scheduled ? 1 : 0, interval, next, new Date().toISOString(), id, existing.owner_user_id).run();
   return sourceById(env, id);
 }
 
@@ -626,11 +686,12 @@ function forbidden() {
 async function recordSourceError(env, id, error) {
   if (!id) return;
   const now = new Date();
-  // A failed/blocked board must not be retried on every cron tick. Retain the
-  // source for operator review and retry after at least six hours.
-  const next = new Date(now.getTime() + 6 * 60 * 60 * 1000).toISOString();
+  const message = errorMessage(error);
+  const retryMinutes = /source returned (401|403)\b/.test(message) ? 1440
+    : /timeout|abort|network|temporar|source returned (429|5\d\d)\b/i.test(message) ? 60 : 360;
+  const next = new Date(now.getTime() + retryMinutes * 60_000).toISOString();
   await getJobDb(env).prepare("UPDATE sources SET last_error = ?1, next_scan_at = ?2, updated_at = ?3 WHERE id = ?4")
-    .bind(errorMessage(error), next, now.toISOString(), id)
+    .bind(message, next, now.toISOString(), id)
     .run();
   await incrementMetric(env, "scan_error", id);
 }
@@ -665,6 +726,8 @@ function stripHtml(value) {
 function decodeHtml(value) {
   return String(value || "")
     .replace(/&quot;/g, '"')
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
     .replace(/&amp;/g, "&")
     .replace(/&#x2F;/g, "/")
     .replace(/&#39;/g, "'");
