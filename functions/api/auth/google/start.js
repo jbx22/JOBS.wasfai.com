@@ -5,6 +5,11 @@ export async function onRequestGet(context) {
   const config = authConfig(context.env || {}, context.request);
   const requestUrl = new URL(context.request.url);
   if (!config.clientId || !config.clientSecret || !config.cookieSecret) {
+    const missing = [];
+    if (!config.clientId) missing.push("GOOGLE_CLIENT_ID");
+    if (!config.clientSecret) missing.push("GOOGLE_CLIENT_SECRET");
+    if (!config.cookieSecret) missing.push("AUTH_COOKIE_SECRET");
+    console.warn("Google OAuth configuration is incomplete", missing.join(", "));
     return json({ error: "Google OAuth is not configured.", code: "GOOGLE_OAUTH_NOT_CONFIGURED" }, 503);
   }
   if (!getJobDb(context.env)) {
