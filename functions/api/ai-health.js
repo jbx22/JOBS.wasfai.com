@@ -1,4 +1,5 @@
 import { getAuthenticatedUser, json } from "./_state.js";
+import { DEEPSEEK_BASE_URL, DEEPSEEK_MODEL, deepseekModel } from "./_deepseek.js";
 
 /** Safe, account-only readiness signal. It never exposes keys or provider errors. */
 export async function onRequestGet(context) {
@@ -27,25 +28,31 @@ export async function onRequestPost(context) {
   if (!expected || !safeEqual(actual, expected)) {
     return json({ error: "Health-check authorization required.", code: "AUTH_REQUIRED" }, 401);
   }
-  if (env.OPENAI_API_KEY) return probeOpenai(env);
+  const probeCoach = new URL(context.request.url).searchParams.get("provider") === "deepseek";
+  if (!probeCoach && env.OPENAI_API_KEY) return probeOpenai(env);
   const apiKey = env.DEEPSEEK_API_KEY || env.AI_API_KEY;
   if (!apiKey) return json({ ready: false, provider: "deepseek", error: "missing_key" }, 503);
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 12000);
   try {
-    const base = String(env.DEEPSEEK_BASE_URL || env.AI_BASE_URL || "https://api.deepseek.com/v1").replace(/\/+$/, "");
+    const base = String(env.DEEPSEEK_BASE_URL || env.AI_BASE_URL || DEEPSEEK_BASE_URL).replace(/\/+$/, "");
+    const model = probeCoach ? DEEPSEEK_MODEL : deepseekModel(env.DEEPSEEK_MODEL || env.AI_MODEL);
     const response = await fetch(`${base}/chat/completions`, {
       method: "POST",
+      redirect: "manual",
       signal: controller.signal,
       headers: { "Authorization": `Bearer ${apiKey}`, "Content-Type": "application/json" },
       body: JSON.stringify({
-        model: env.DEEPSEEK_MODEL || env.AI_MODEL || "deepseek-v4-flash",
-        max_tokens: 8,
+        model,
+        thinking: { type: "disabled" },
+        max_tokens: 24,
         temperature: 0,
         messages: [{ role: "user", content: "Reply with READY only." }],
       }),
     });
-    return json({ ready: response.ok, provider: "deepseek", status: response.status, checked_at: new Date().toISOString() }, response.ok ? 200 : 502);
+    const data = response.ok ? await response.json().catch(() => null) : null;
+    const ready = Boolean(data?.choices?.[0]?.message?.content?.trim());
+    return json({ ready, provider: "deepseek", model, status: response.status, checked_at: new Date().toISOString() }, ready ? 200 : 502);
   } catch (error) {
     return json({ ready: false, provider: "deepseek", error: error?.name === "AbortError" ? "timeout" : "provider_error" }, 502);
   } finally {

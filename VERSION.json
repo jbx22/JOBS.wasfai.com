@@ -1,7 +1,7 @@
 {
-  "current": 66,
-  "lastDescription": "Let Google reuse an existing sign-in session",
-  "lastAt": "2026-11-22 20:33",
+  "current": 67,
+  "lastDescription": "Repair résumé coaching and upgrade to DeepSeek V4.1 Flash",
+  "lastAt": "2026-11-22 20:58",
   "history": [
     {
       "n": 1,
@@ -322,6 +322,11 @@
       "n": 66,
       "description": "Let Google reuse an existing sign-in session",
       "at": "2026-11-22 20:33"
+    },
+    {
+      "n": 67,
+      "description": "Repair résumé coaching and upgrade to DeepSeek V4.1 Flash",
+      "at": "2026-11-22 20:58"
     }
   ]
 }

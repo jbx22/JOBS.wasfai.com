@@ -1,4 +1,5 @@
 import { adminJson, audit, ensureAdminSchema, requireAdmin, SUPER_ADMIN_EMAIL } from "../_admin.js";
+import { DEEPSEEK_LABEL, deepseekModel } from "../_deepseek.js";
 import { moyasarInvoiceRecord, moyasarStatus } from "../_moyasar.js";
 import { noContent } from "../_state.js";
 import { ensureSubscriptionSchema, planById, publicPlans } from "../_subscriptions.js";
@@ -221,7 +222,7 @@ async function aiManagement(context) {
   return adminJson({
     providers: [
       { id: "luna", label: "GPT-5.6 Luna", configured: Boolean(env.OPENAI_API_KEY), model: env.OPENAI_MODEL || env.LUNA_MODEL || "gpt-5.6-luna" },
-      { id: "deepseek", label: "DeepSeek V4 Flash", configured: Boolean(env.DEEPSEEK_API_KEY || env.AI_API_KEY), model: env.DEEPSEEK_MODEL || env.AI_MODEL || "deepseek-v4-flash" },
+      { id: "deepseek", label: DEEPSEEK_LABEL, configured: Boolean(env.DEEPSEEK_API_KEY || env.AI_API_KEY), model: deepseekModel(env.DEEPSEEK_MODEL || env.AI_MODEL) },
       { id: "openrouter", label: "OpenRouter", configured: Boolean(env.OPENROUTER_API_KEY), model: env.MINIMAX_MODEL || env.OPENROUTER_MINIMAX_MODEL || "minimax/minimax-m3" },
     ],
     usage,

@@ -154,9 +154,12 @@ Local frozen snapshots live under `versions/jobs{N}/`.
 - Example jobs are labelled as examples. Live matching only returns verified ingestion records; it never creates synthetic matches.
 - Ghost Writer never returns a deterministic fallback. Configure and validate
   `DEEPSEEK_API_KEY` or `AI_API_KEY` in Cloudflare Pages environment variables
-  to enable live DeepSeek V4 Flash generation. Optional overrides:
-  `DEEPSEEK_MODEL` defaults to `deepseek-v4-flash`, and `DEEPSEEK_BASE_URL`
+  to enable live DeepSeek V4.1 Flash generation. Optional overrides:
+  `DEEPSEEK_MODEL` defaults to `deepseek-flash`, and `DEEPSEEK_BASE_URL`
   defaults to `https://api.deepseek.com/v1`.
+- The résumé coach uses `deepseek-flash`. A deployment smoke check can target
+  that model with `POST /api/ai-health?provider=deepseek` and the configured
+  `AI_HEALTH_TOKEN` in the bearer authorization header.
 - D1 account state is normalized into independently revisioned documents. The legacy blob remains available as a rollback source during the migration period.
 - Some recursive resolvers may take a short time to observe the new
   `jobs.wasfai.com` DNS record.

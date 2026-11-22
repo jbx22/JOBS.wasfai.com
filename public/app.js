@@ -31,7 +31,7 @@ const NAV = [
 ];
 
 const AI_WRITER_MODELS = [
-  { id: "deepseek", label: "DeepSeek V4 Flash" },
+  { id: "deepseek", label: "DeepSeek V4.1 Flash" },
   { id: "minimax-m3", label: "MiniMax M3" },
   { id: "glm-5.2", label: "GLM 5.2" },
 ];
@@ -118,6 +118,7 @@ let state = {
   applicationDrafts: {},
   applicationDraftTask: null,
   resumeCoach: null,
+  resumeCoachPending: false,
   approvedMasterResume: false,
   masterResume: { ar: "", en: "", approved_at: "" },
   tailoringBriefs: {},
@@ -449,7 +450,7 @@ function ghostwriterFor(jobId) {
 }
 
 function aiWriterLabel(id = state.aiWriterModel) {
-  return AI_WRITER_MODELS.find((model) => model.id === id)?.label || "DeepSeek V4 Flash";
+  return AI_WRITER_MODELS.find((model) => model.id === id)?.label || AI_WRITER_MODELS[0].label;
 }
 
 function loadLocalProfile() {
@@ -1293,7 +1294,11 @@ async function apiJson(path, options = {}) {
     headers: { "Content-Type": "application/json", ...(options.headers || {}) },
     ...options,
   });
-  if (!response.ok) throw new Error(`API ${path} failed with ${response.status}`);
+  if (!response.ok) {
+    const error = new Error(`API ${path} failed with ${response.status}`);
+    error.code = (await response.json().catch(() => null))?.code;
+    throw error;
+  }
   return response.json();
 }
 
@@ -1305,7 +1310,7 @@ async function apiNoContent(path, options = {}) {
   if (!response.ok) throw new Error(`API ${path} failed with ${response.status}`);
 }
 
-async function runAction(key, loading, success, task) {
+async function runAction(key, loading, success, task, errorMessage) {
   state.action = { pending: key, message: loading, error: "" };
   render();
   try {
@@ -1316,7 +1321,7 @@ async function runAction(key, loading, success, task) {
     state.action = {
       pending: "",
       message: "",
-      error: "تعذّر تنفيذ العملية. راجع البيانات وحاول مرة أخرى.",
+      error: errorMessage?.(error?.code) || "تعذّر تنفيذ العملية. راجع البيانات وحاول مرة أخرى.",
     };
     render();
     return null;
@@ -2367,7 +2372,7 @@ function renderAccount() {
         </div>
       </div>
     </section>
-    ${renderResumeCoach(p, resumeReady)}
+    ${renderResumeCoach()}
     <section class="section">
       <div class="section-block">
         <h3>بيانات البحث والتخصيص</h3>
@@ -2429,7 +2434,10 @@ function renderAuthPanel() {
   </div>`;
 }
 
-function renderResumeCoach(profile, resumeReady) {
+function renderResumeCoach() {
+  const ready = readableResumeText(state.profile?.resume_text);
+  const signedIn = state.session?.authenticated;
+  const pending = state.resumeCoachPending;
   const coach = state.resumeCoach || null;
   const approved = masterResumeReady();
   const searchProfile = coach?.search_profile || {};
@@ -2444,17 +2452,18 @@ function renderResumeCoach(profile, resumeReady) {
             <h3>مدرب السيرة بالذكاء الاصطناعي</h3>
             <p class="muted tiny">حسّن السيرة واعتمدها أولاً. بعدها تعتمد المطابقة وحزم التقديم على السيرة الحقيقية فقط.</p>
           </div>
-          <span class="badge ${approved ? "" : "muted"}">${approved ? "السيرة معتمدة" : "تحتاج اعتماد"}</span>
+          <span class="badge ${approved ? "" : "muted"}" data-coach-approval>${approved ? "السيرة معتمدة" : "تحتاج اعتماد"}</span>
         </div>
         <div class="resume-flow">
-          <span class="${resumeReady ? "done" : ""}">1. رفع السيرة</span>
+          <span class="${ready ? "done" : ""}" data-coach-input-step>1. رفع السيرة</span>
           <span class="${coach ? "done" : ""}">2. تحسين</span>
           <span class="${approved ? "done" : ""}">3. اعتماد</span>
           <span class="${approved ? "done" : ""}">4. بحث وتخصيص</span>
         </div>
-        ${resumeReady ? "" : `<div class="empty compact">الصق السيرة الأصلية أو ارفعها أولاً. المدرب يحتاج نصاً حقيقياً قبل التحسين.</div>`}
+        <div class="empty compact" data-coach-input-hint ${ready ? "hidden" : ""}>الصق السيرة الأصلية أو ارفعها أولاً. المدرب يحتاج نصاً واضحاً قبل التحسين.</div>
+        ${signedIn ? "" : `<div class="empty compact">سجّل الدخول لاستخدام مدرب السيرة.</div>`}
         ${coach ? `
-          <div class="coach-grid">
+          <div class="coach-grid" data-coach-draft>
             <div>
               <h4>السيرة العربية المحسنة</h4>
               <textarea class="document-editor" data-master-resume="ar" aria-label="Arabic master resume">${esc(coach.ar_master_resume || "")}</textarea>
@@ -2464,22 +2473,38 @@ function renderResumeCoach(profile, resumeReady) {
               <textarea class="document-editor" data-master-resume="en" aria-label="English master resume">${esc(coach.en_master_resume || "")}</textarea>
             </div>
           </div>
-          <div class="tags">
+          <div class="tags" data-coach-draft>
             ${titles.slice(0, 6).map((item) => `<span class="tag">${esc(item)}</span>`).join("")}
             ${keywords.slice(0, 8).map((item) => `<span class="tag outline">${esc(item)}</span>`).join("")}
           </div>
-          <ul class="coach-list">
+          <ul class="coach-list" data-coach-draft>
             ${improvements.map((item) => `<li>${esc(item)}</li>`).join("")}
           </ul>
-          <p class="muted tiny">${esc(coach.approval_note || "راجع السيرة قبل الاعتماد.")}</p>
+          <p class="muted tiny" data-coach-draft>${esc(coach.approval_note || "راجع السيرة قبل الاعتماد.")}</p>
         ` : ""}
         <div class="row profile-actions">
-          <button class="btn primary" data-resume-coach ${resumeReady ? "" : "disabled"}>${iconSpark()} تحسين السيرة</button>
-          <button class="btn ${approved ? "outline" : "primary"}" data-approve-master-resume ${coach ? "" : "disabled"}>${iconCheck()} ${approved ? "السيرة معتمدة" : "اعتماد السيرة المحسنة"}</button>
+          <button class="btn primary" data-resume-coach ${ready && signedIn && !pending ? "" : "disabled"}>${iconSpark()} ${pending ? "جاري تحسين السيرة…" : "تحسين السيرة"}</button>
+          <button class="btn ${approved ? "outline" : "primary"}" data-approve-master-resume ${coach ? "" : "disabled"}>${iconCheck()} <span>${approved ? "السيرة معتمدة" : "اعتماد السيرة المحسنة"}</span></button>
           <button class="btn outline" data-search-approved-jobs ${approved ? "" : "disabled"}>${iconBolt()} البحث عن وظائف مناسبة</button>
         </div>
       </div>
     </section>`;
+}
+
+const RESUME_COACH_ERRORS = {
+  AUTH_REQUIRED: "سجّل الدخول، ثم جرّب تحسين السيرة مرة أخرى.",
+  RESUME_REQUIRED: "الصق نص السيرة الكامل أو ارفع ملفاً واضحاً، ثم حاول مرة أخرى.",
+  RATE_LIMITED: "انتظر دقيقة قبل طلب تحسين جديد.",
+  AI_BUSY: "مدرب السيرة مشغول الآن. حاول بعد قليل.",
+  AI_TIMEOUT: "استغرق تحسين السيرة وقتاً أطول من المتوقع. حاول مرة أخرى.",
+  AI_INVALID_DRAFT: "لم تكتمل مسودتا السيرة. حاول مرة أخرى.",
+  RESUME_CHANGED: "تغيّر نص السيرة أثناء التحسين. حسّن النص الحالي مرة أخرى.",
+};
+
+function resetResumeCoach() {
+  state.resumeCoach = null;
+  state.approvedMasterResume = false;
+  state.masterResume = { ar: "", en: "", approved_at: "" };
 }
 
 function renderLegal(page) {
@@ -3235,16 +3260,29 @@ function setupEvents() {
   const resumeCoachButton = document.querySelector("[data-resume-coach]");
   if (resumeCoachButton) {
     resumeCoachButton.addEventListener("click", async () => {
+      if (state.resumeCoachPending || !state.session?.authenticated || !readableResumeText(state.profile?.resume_text)) return;
+      const profile = state.profile;
+      const accountId = state.session.user?.sub;
+      state.resumeCoachPending = true;
       const coach = await runAction(
         "resume-coach",
         "جاري تحسين السيرة الأصلية...",
         "أصبحت مسودة السيرة المحسنة جاهزة للمراجعة",
-        () =>
-          apiJson("/api/resume-coach", {
+        async () => {
+          const draft = await apiJson("/api/resume-coach", {
             method: "POST",
-            body: JSON.stringify({ profile: state.profile }),
-          }),
+            body: JSON.stringify({ profile }),
+          });
+          if (profile.resume_text !== state.profile?.resume_text || accountId !== state.session.user?.sub) {
+            const error = new Error("Resume changed during generation");
+            error.code = "RESUME_CHANGED";
+            throw error;
+          }
+          return draft;
+        },
+        (code) => RESUME_COACH_ERRORS[code] || "تعذّر تشغيل مدرب السيرة مؤقتاً. جرّب مرة أخرى.",
       );
+      state.resumeCoachPending = false;
       if (coach) {
         state.resumeCoach = coach;
         state.approvedMasterResume = false;
@@ -3403,9 +3441,27 @@ function setupEvents() {
     const eventName = item.tagName === "SELECT" ? "change" : "input";
     item.addEventListener(eventName, (e) => {
       const key = e.target.dataset.profileField;
+      if (state.profile?.[key] === e.target.value) return;
       state.profile = { ...(state.profile || {}), [key]: e.target.value };
       if (key === "resume_text") {
-        state.approvedMasterResume = false;
+        resetResumeCoach();
+        const ready = readableResumeText(e.target.value);
+        const coach = document.querySelector(".resume-coach");
+        if (coach) {
+          coach.classList.remove("approved");
+          coach.querySelectorAll(".resume-flow span").forEach((item) => item.classList.remove("done"));
+          coach.querySelector("[data-coach-input-step]").classList.toggle("done", ready);
+          coach.querySelector("[data-coach-input-hint]").hidden = ready;
+          const badge = coach.querySelector("[data-coach-approval]");
+          badge.textContent = "تحتاج اعتماد";
+          badge.classList.add("muted");
+          coach.querySelectorAll("[data-coach-draft]").forEach((item) => item.remove());
+          const approve = coach.querySelector("[data-approve-master-resume]");
+          approve.disabled = true;
+          approve.querySelector("span").textContent = "اعتماد السيرة المحسنة";
+          coach.querySelector("[data-search-approved-jobs]").disabled = true;
+          coach.querySelector("[data-resume-coach]").disabled = !ready || !state.session?.authenticated || state.resumeCoachPending;
+        }
         saveLocalAiWriterState();
       }
     });
@@ -3446,8 +3502,7 @@ function setupEvents() {
         resume_filename: file.name,
         resume_text: text || "",
       };
-      state.approvedMasterResume = false;
-      state.resumeCoach = null;
+      resetResumeCoach();
       if (!readableResumeText(text)) {
         state.profile = {
           ...(state.profile || {}),

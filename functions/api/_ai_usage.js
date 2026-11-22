@@ -1,6 +1,7 @@
 import { getJobDb } from "./_db.js";
 const TOKEN_PRICES_PER_MILLION = {
   "deepseek-v4-flash": { input: 0.20, output: 0.80 },
+  "deepseek-flash": { input: 0.30, output: 1.20 }, // DeepSeek peak, uncached estimate.
   "minimax/minimax-m3": { input: 0.20, output: 1.10 },
   "z-ai/glm-5.2": { input: 0.30, output: 1.20 },
 };
