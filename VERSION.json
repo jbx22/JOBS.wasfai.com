@@ -1,7 +1,7 @@
 {
-  "current": 64,
-  "lastDescription": "Recover cleanly from Google OAuth callback failures",
-  "lastAt": "2026-11-22 20:02",
+  "current": 65,
+  "lastDescription": "Use bounded form-encoded requests for Google sign-in",
+  "lastAt": "2026-11-22 20:07",
   "history": [
     {
       "n": 1,
@@ -312,6 +312,11 @@
       "n": 64,
       "description": "Recover cleanly from Google OAuth callback failures",
       "at": "2026-11-22 20:02"
+    },
+    {
+      "n": 65,
+      "description": "Use bounded form-encoded requests for Google sign-in",
+      "at": "2026-11-22 20:07"
     }
   ]
 }
