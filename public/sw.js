@@ -1,4 +1,4 @@
-const CACHE_NAME = "jobs-wasfai-v62";
+const CACHE_NAME = "jobs-wasfai-v64";
 const APP_SHELL = [
   "/",
   "/app",

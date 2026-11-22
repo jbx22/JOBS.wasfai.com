@@ -2236,6 +2236,7 @@ function sourceCardHtml(s) {
 /* ---------------- Account ---------------- */
 function renderLogin() {
   if (state.session?.authenticated) return navigate("/account");
+  const retry = new URLSearchParams(location.search).get("oauth_retry") === "1";
   shell(
     `<main class="auth-page">
       <section class="login-card">
@@ -2243,6 +2244,7 @@ function renderLogin() {
         <span class="eyebrow">حسابك المهني</span>
         <h1>ابدأ رحلتك الوظيفية</h1>
         <p>أنشئ حسابك للمرة الأولى أو سجّل الدخول بحساب Google. سنحفظ سيرتك، المطابقات، وحزم التقديم بأمان.</p>
+        ${retry ? '<p role="alert">تعذّر إكمال تسجيل الدخول بحساب Google. حاول مرة أخرى.</p>' : ""}
         <label class="terms-consent">
           <input type="checkbox" data-terms-consent />
           <span>أوافق على <button data-nav="/terms">الشروط</button> و<button data-nav="/privacy">سياسة الخصوصية</button>.</span>
@@ -2751,10 +2753,13 @@ function setupEvents() {
   const termsConsent = document.querySelector("[data-terms-consent]");
   const googleLogin = document.querySelector("[data-google-login]");
   if (termsConsent && googleLogin) {
+    const oauthParams = new URLSearchParams({ terms: "1" });
+    const next = new URLSearchParams(location.search).get("next");
+    if (next) oauthParams.set("next", next);
     termsConsent.addEventListener("change", () => {
       googleLogin.classList.toggle("disabled", !termsConsent.checked);
       googleLogin.setAttribute("aria-disabled", String(!termsConsent.checked));
-      googleLogin.href = termsConsent.checked ? "/api/auth/google/start?terms=1" : "";
+      googleLogin.href = termsConsent.checked ? `/api/auth/google/start?${oauthParams}` : "";
     });
     googleLogin.addEventListener("click", (event) => {
       if (!termsConsent.checked) event.preventDefault();
