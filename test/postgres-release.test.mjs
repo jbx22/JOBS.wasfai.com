@@ -7,6 +7,7 @@ import { USERS_SCHEMA, sessionCookie } from "../functions/api/auth/_auth.js";
 import { translateSql } from "../vps/db-gateway/sql.mjs";
 import { onRequest as recruitment } from "../functions/api/recruitment/[[route]].js";
 import { onRequestGet as callback } from "../functions/api/auth/google/callback.js";
+import { onRequestPost as selectPlan } from "../functions/api/subscriptions/index.js";
 import { listPublicJobs } from "../functions/api/_public_jobs.js";
 import { activatePaidSubscription, ensureSubscriptionSchema, planById } from "../functions/api/_subscriptions.js";
 import { getJobDb } from "../functions/api/_db.js";
@@ -29,6 +30,11 @@ test("PostgreSQL: OAuth, employer moderation, public filters and invoice replay 
       return { results: mode === "run" ? [] : mode === "first" ? result.rows.slice(0, 1) : result.rows, meta: { changes: result.rowCount } };
     };
     t.mock.method(globalThis, "fetch", async (url, init = {}) => {
+      if (String(url) === "https://api.moyasar.com/v1/invoices") {
+        const order = JSON.parse(init.body);
+        return Response.json({ id: "pg-checkout", status: "initiated", amount: order.amount, currency: order.currency,
+          metadata: order.metadata, url: "https://checkout.moyasar.com/invoices/pg-checkout" });
+      }
       if (String(url).endsWith("googleapis.com/token")) return Response.json({ access_token: "test-token" });
       if (String(url).includes("openidconnect.googleapis.com")) return Response.json({ sub: "pg-user", email: "pg@example.com", name: "جابر", email_verified: true });
       assert.ok(String(url).startsWith("https://gateway.test/"));
@@ -94,6 +100,16 @@ test("PostgreSQL: OAuth, employer moderation, public filters and invoice replay 
     await activatePaidSubscription(db, employer.sub, plan, invoice);
     const replay = await activatePaidSubscription(db, employer.sub, plan, invoice);
     assert.equal(replay.already_activated, true);
+    const cookie = (await sessionCookie(employer, testEnv.AUTH_COOKIE_SECRET)).split(";")[0];
+    const checkout = () => selectPlan({ env: { ...testEnv, MOYASAR_SECRET_KEY: "sk_live_fixture" }, request: new Request("https://jobs.wasfai.com/api/subscriptions", {
+      method: "POST", headers: { Cookie: cookie, "Content-Type": "application/json" }, body: JSON.stringify({ plan: plan.id }),
+    }) });
+    const created = await checkout();
+    assert.equal(created.status, 201, await created.clone().text());
+    const order = await created.json();
+    const reopened = await checkout();
+    assert.equal(reopened.status, 201, await reopened.clone().text());
+    assert.equal((await reopened.json()).order_id, order.order_id);
   } finally {
     await client.query("ROLLBACK").catch(() => {});
     await client.end();

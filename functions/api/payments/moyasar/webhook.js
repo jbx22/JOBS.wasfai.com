@@ -4,7 +4,7 @@ import { processMoyasarPayload } from "./_shared.js";
 export async function onRequestPost(context) {
   const payload = await readBody(context);
   const result = await processMoyasarPayload(context, payload, { requireWebhookSecret: true });
-  return json(result, result.ok ? 200 : 401);
+  return json(result, result.ok ? 200 : result.code === "BAD_WEBHOOK_SECRET" ? 401 : result.code === "PAYMENT_VERIFICATION_FAILED" ? 409 : 503);
 }
 
 export async function onRequestOptions() {

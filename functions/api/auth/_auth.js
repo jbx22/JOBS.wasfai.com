@@ -11,8 +11,8 @@ export function authConfig(env, request) {
   const productionOrigin = "https://jobs.wasfai.com";
   return {
     origin: configuredOrigin || (env.ENVIRONMENT === "production" ? productionOrigin : url.origin),
-    clientId: env.GOOGLE_CLIENT_ID || "",
-    clientSecret: env.GOOGLE_CLIENT_SECRET || "",
+    clientId: String(env.GOOGLE_CLIENT_ID || "").trim(),
+    clientSecret: String(env.GOOGLE_CLIENT_SECRET || "").trim(),
     cookieSecret: env.AUTH_COOKIE_SECRET || "",
   };
 }

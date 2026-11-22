@@ -1,7 +1,8 @@
 import { adminJson, audit, ensureAdminSchema, requireAdmin, SUPER_ADMIN_EMAIL } from "../_admin.js";
-import { fetchMoyasarInvoice, moyasarStatus } from "../_moyasar.js";
+import { moyasarInvoiceRecord, moyasarStatus } from "../_moyasar.js";
 import { noContent } from "../_state.js";
-import { activatePaidSubscription, ensureSubscriptionSchema, planById, publicPlans } from "../_subscriptions.js";
+import { ensureSubscriptionSchema, planById, publicPlans } from "../_subscriptions.js";
+import { reconcileMoyasarPayment } from "../payments/moyasar/_shared.js";
 
 export async function onRequest(context) {
   if (context.request.method === "OPTIONS") return noContent();
@@ -161,16 +162,11 @@ async function syncPayment(context, id) {
   if (access.error) return access.error;
   await ensureSubscriptionSchema(access.db);
   const row = await access.db.prepare("SELECT * FROM subscription_payments WHERE id = ?").bind(id).first();
-  if (!row) return adminJson({ error: "Payment was not found.", code: "NOT_FOUND" }, 404);
-  const invoice = await fetchMoyasarInvoice(context.env || {}, row.provider_invoice_id);
-  await access.db.prepare("UPDATE subscription_payments SET status = ?, raw_payload = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
-    .bind(invoice.status || row.status, JSON.stringify(invoice), id).run();
-  if (String(invoice.status) === "paid") {
-    const plan = planById(row.plan);
-    if (plan) await activatePaidSubscription(access.db, row.user_id, plan, invoice);
-  }
-  await audit(context, access, "payment.sync", "payment", id, { invoice_id: row.provider_invoice_id, status: invoice.status });
-  return adminJson({ ok: true, invoice });
+  if (!row?.provider_invoice_id) return adminJson({ error: "Payment invoice was not found.", code: "NOT_FOUND" }, 404);
+  const result = await reconcileMoyasarPayment(context.env, access.db, row);
+  if (!result.ok) return adminJson({ error: "Payment could not be verified.", code: result.code }, result.code === "PAYMENT_VERIFICATION_FAILED" ? 409 : 503);
+  await audit(context, access, "payment.sync", "payment", id, { invoice_id: row.provider_invoice_id, status: result.status });
+  return adminJson({ ok: true, invoice: moyasarInvoiceRecord(result.invoice) });
 }
 
 async function activatePayment(context, id) {

@@ -1,3 +1,5 @@
+import { moyasarInvoiceRecord } from "./_moyasar.js";
+
 export const SUBSCRIPTION_PLANS = [
   {
     id: "free",
@@ -149,7 +151,7 @@ export async function activatePaidSubscription(db, userId, plan, invoice, status
   await ensureSubscriptionSchema(db);
   const expectedAmount = planAmountHalalas(plan);
   if (
-    !invoice?.id
+    !invoice?.id || !plan?.price_sar
     || String(invoice.status) !== "paid"
     || Number(invoice.amount) !== expectedAmount
     || String(invoice.currency || "").toUpperCase() !== "SAR"
@@ -180,7 +182,7 @@ export async function activatePaidSubscription(db, userId, plan, invoice, status
     `).bind(userId, plan.id, status, plan.ai_monthly_limit_usd, periodEnd, invoice.id, activationId),
     db.prepare(`UPDATE subscription_payments SET status=?, provider_payment_id=?, raw_payload=?, updated_at=CURRENT_TIMESTAMP
       WHERE provider_invoice_id=? AND user_id=?`)
-      .bind(invoice.status, invoice.payments?.[0]?.id || "", JSON.stringify(invoice), invoice.id, userId),
+      .bind(invoice.status, invoice.payments?.[0]?.id || "", JSON.stringify(moyasarInvoiceRecord(invoice)), invoice.id, userId),
   ]);
   const activation = await db.prepare("SELECT activation_id FROM payment_activations WHERE invoice_id=?").bind(invoice.id).first();
   return { activated: activation?.activation_id === activationId, already_activated: activation?.activation_id !== activationId };

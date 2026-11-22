@@ -69,9 +69,9 @@ const TEXT = {
     savedJobs: "Saved jobs",
     unavailable: "Live subscription status is unavailable, but plan details are shown.",
     vatQ: "Is SAR 50 VAT-inclusive?",
-    vatA: "Recommended launch display is SAR 50/month VAT-inclusive. Checkout wording can be adjusted once payment is connected.",
+    vatA: "The hosted checkout shows the total before you pay.",
     paymentQ: "What happens when Gold is selected?",
-    paymentA: "The request is saved as pending payment. Connect Moyasar, Stripe, or manual activation next.",
+    paymentA: "When checkout is available, Moyasar hosts payment. Jobs Wasfai activates Gold after verifying the invoice. Plans are paid for one term at a time.",
     freeQ: "Why keep a Free plan?",
     freeA: "It lets users test matching and AI kits, while the limits naturally push active job seekers to Gold.",
     toggle: "العربية",
@@ -97,16 +97,16 @@ const TEXT = {
     savedJobs: "وظائف محفوظة",
     unavailable: "حالة الاشتراك المباشرة غير متاحة الآن، لكن تفاصيل الباقات ظاهرة.",
     vatQ: "هل 50 ريال شاملة الضريبة؟",
-    vatA: "الأفضل في الإطلاق عرضها 50 ريال شهريا شاملة الضريبة. يمكن تعديل نص الدفع عند ربط بوابة الدفع.",
+    vatA: "تظهر التكلفة الإجمالية في صفحة الدفع قبل تأكيده.",
     paymentQ: "ماذا يحدث عند اختيار الذهبي؟",
-    paymentA: "يتم حفظ الطلب كاشتراك بانتظار الدفع. الخطوة التالية ربط مدى/مويَسّر أو Stripe أو التفعيل اليدوي.",
+    paymentA: "عند توفر الدفع تُفتح صفحة مويَسّر. تُفعّل الباقة الذهبية بعد التحقق من الفاتورة. يُدفع لكل مدة اشتراك على حدة.",
     freeQ: "لماذا نبقي الباقة المجانية؟",
     freeA: "تسمح للمستخدم بتجربة المطابقة والحزم، ثم تدفع الحدود المستخدم الجاد للترقية إلى الذهبي.",
     toggle: "English",
   },
 };
 
-const state = { plans: [], current: null, authenticated: false, user: null, message: "", error: "", locale: loadLocale(), busyPlan: "", payment: null };
+const state = { plans: [], current: null, authenticated: false, user: null, message: "", error: "", locale: loadLocale(), busyPlan: "", payment: null, payment_ready: false };
 
 init();
 
@@ -118,27 +118,55 @@ async function init() {
     state.plans = FALLBACK_PLANS;
     state.error = text("unavailable");
   }
+  render();
   await readPaymentReturn();
   render();
 }
 
 async function readPaymentReturn() {
   const params = new URLSearchParams(location.search);
-  if (params.get("payment") !== "success" || !state.authenticated) return;
+  if (params.get("payment") === "cancelled") {
+    state.message = state.locale === "ar" ? "يمكنك استئناف الدفع من صفحة الاشتراك." : "You can resume checkout from this page.";
+    history.replaceState({}, "", "/pricing/");
+    return;
+  }
+  if (params.get("payment") !== "success") return;
+  if (!state.authenticated) {
+    state.message = state.locale === "ar" ? "سجّل الدخول للتحقق من الفاتورة." : "Sign in to verify your invoice.";
+    return;
+  }
+  const order = params.get("order");
+  if (!/^\d{1,15}$/.test(order || "")) {
+    state.error = state.locale === "ar" ? "مرجع الفاتورة غير متاح." : "The checkout reference is missing.";
+    return;
+  }
+  state.message = state.locale === "ar" ? "جارٍ التحقق من الدفع." : "Verifying your payment.";
+  render();
   try {
-    const data = await api("/api/payments/moyasar/status");
+    const data = await api(`/api/payments/moyasar/status?order=${order}`);
     state.payment = data.payment;
-    if (data.payment?.status === "paid") {
-      state.message = state.locale === "ar" ? "تم الدفع وتفعيل اشتراكك الذهبي بنجاح." : "Payment received. Your Gold subscription is active.";
+    if (data.verified && data.subscription_active && data.payment?.status === "paid") {
       const subscription = await api("/api/subscriptions");
       state.current = subscription.current;
+      state.message = state.locale === "ar" ? "تم الدفع وتفعيل اشتراكك الذهبي بنجاح." : "Payment received. Your Gold subscription is active.";
+      history.replaceState({}, "", "/pricing/");
+    } else if (data.verified && ["failed", "refunded", "canceled", "expired", "voided"].includes(data.payment?.status)) {
+      state.message = "";
+      state.error = state.locale === "ar" ? "هذه الفاتورة لم تُفعّل الاشتراك." : "This invoice did not activate your subscription.";
     } else {
       state.message = state.locale === "ar" ? "جارٍ التحقق من الدفع. حدّث الصفحة بعد لحظات." : "Your payment is being verified. Refresh in a moment.";
     }
   } catch (error) {
-    state.error = error.message || "Payment status could not be verified.";
+    state.message = "";
+    state.error = state.locale === "ar" ? "لم يتم التحقق من الدفع بعد. حدّث الصفحة للتحقق مجدداً." : "Payment could not be verified yet. Refresh to retry.";
   }
-  history.replaceState({}, "", "/pricing/");
+}
+
+function pricingSignIn() {
+  const params = new URLSearchParams(location.search);
+  const order = params.get("order");
+  const next = params.get("payment") === "success" && /^\d{1,15}$/.test(order || "") ? `/pricing/?payment=success&order=${order}` : "/pricing/";
+  return `/api/auth/google/start?next=${encodeURIComponent(next)}`;
 }
 
 function render() {
@@ -153,7 +181,7 @@ function render() {
       <div class="top-actions">
         <button class="btn" data-toggle-locale>${esc(text("toggle"))}</button>
         <a class="btn" href="/app">${esc(text("openApp"))}</a>
-        ${state.authenticated ? `<a class="btn" href="/account">${esc(state.user?.email || "Account")}</a>` : `<a class="btn primary" href="/api/auth/google/start?next=%2Fpricing%2F">${esc(text("signIn"))}</a>`}
+        ${state.authenticated ? `<a class="btn" href="/account">${esc(state.user?.email || "Account")}</a>` : `<a class="btn primary" href="${esc(pricingSignIn())}">${esc(text("signIn"))}</a>`}
       </div>
     </header>
     <section class="hero">
@@ -176,7 +204,8 @@ function render() {
 }
 
 function renderPlan(plan) {
-  const current = state.current?.plan === plan.id;
+  const current = state.current?.plan === plan.id && state.current.status === "active" && state.current.current_period_end > new Date().toISOString().slice(0, 10);
+  const unavailable = plan.id !== "free" && !state.payment_ready;
   const featured = plan.id === "gold_monthly";
   return `
     <article class="plan-card ${featured ? "featured" : ""}">
@@ -193,8 +222,8 @@ function renderPlan(plan) {
         ${limit(plan.limits.saved_jobs, text("savedJobs"))}
       </div>
       <ul class="features">${planFeatures(plan).map((item) => `<li>${esc(item)}</li>`).join("")}</ul>
-      <button class="btn ${featured ? "gold" : "primary"}" data-select-plan="${esc(plan.id)}" ${current || state.busyPlan ? "disabled" : ""}>
-        ${state.busyPlan === plan.id ? (state.locale === "ar" ? "جارٍ فتح الدفع..." : "Opening checkout...") : current ? esc(text("currentButton")) : plan.id === "free" ? esc(text("startFree")) : esc(text("chooseGold"))}
+      <button class="btn ${featured ? "gold" : "primary"}" data-select-plan="${esc(plan.id)}" ${current || state.busyPlan || unavailable ? "disabled" : ""}>
+        ${state.busyPlan === plan.id ? (state.locale === "ar" ? "جارٍ فتح الدفع..." : "Opening checkout...") : current ? esc(text("currentButton")) : unavailable ? (state.locale === "ar" ? "الدفع غير متاح حالياً" : "Checkout unavailable") : plan.id === "free" ? esc(text("startFree")) : esc(text("chooseGold"))}
       </button>
     </article>`;
 }
@@ -215,7 +244,7 @@ async function selectPlan(plan) {
   state.message = "";
   state.error = "";
   if (!state.authenticated) {
-    location.href = "/api/auth/google/start?next=%2Fpricing%2F";
+    location.href = pricingSignIn();
     return;
   }
   state.busyPlan = plan;
@@ -225,7 +254,9 @@ async function selectPlan(plan) {
     state.current = data.current;
     state.message = data.message || "Subscription updated.";
     if (data.next_action === "redirect_to_moyasar" && data.checkout_url) {
-      location.assign(data.checkout_url);
+      const checkout = new URL(data.checkout_url);
+      if (checkout.protocol !== "https:" || checkout.host !== "checkout.moyasar.com" || checkout.username || checkout.password || !checkout.pathname.startsWith("/invoices/")) throw new Error("Checkout link could not be verified.");
+      location.assign(checkout.href);
       return;
     }
   } catch (error) {

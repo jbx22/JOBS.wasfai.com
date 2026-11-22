@@ -234,3 +234,6 @@
 ## jobs60 — 2026-11-22 18:04
 
 - Add employer job feeds, evidence-based fit evaluation, vacancy import, screening and recruiter drafts, and follow-up calendar export.
+## jobs61 — 2026-11-22 18:57
+
+- Prepare production billing: verify exact orders, preserve active plans, harden callback and Google provider requests.
