@@ -101,6 +101,9 @@ let state = {
   region: "السعودية",
   query: "",
   jobFilter: "all",
+  cityFilter: "",
+  minSalarySar: 0,
+  experienceYears: 0,
   selectedJobs: [],
   sourceForm: { label: "", url: "", region: "السعودية" },
   region: "",
@@ -1244,6 +1247,31 @@ function recentJobs(limit = 4) {
   return [...state.jobs].slice(0, limit);
 }
 
+const JOB_CITIES = [
+  { key: "riyadh", label: "الرياض", pattern: /riyadh|الرياض/i },
+  { key: "jeddah", label: "جدة", pattern: /jeddah|jedda|جدة/i },
+  { key: "dammam", label: "الدمام", pattern: /dammam|الدمام/i },
+  { key: "makkah", label: "مكة", pattern: /makkah|mecca|مكة/i },
+  { key: "madinah", label: "المدينة المنورة", pattern: /madinah|medina|المدينة/i },
+  { key: "najran", label: "نجران", pattern: /najran|نجران/i },
+  { key: "remote", label: "عن بعد", pattern: /remote|عن بعد/i },
+];
+
+function matchesCity(job, city) {
+  const option = JOB_CITIES.find((item) => item.key === city);
+  return !option || option.pattern.test(String(job.location || ""));
+}
+
+function reportedSalaryMin(job) {
+  const value = Number(job.salary_min_sar ?? job.salary_min ?? 0);
+  return Number.isFinite(value) && value > 0 && (!job.salary_currency || job.salary_currency === "SAR") ? value : null;
+}
+
+function reportedExperienceYears(job) {
+  const value = Number(job.experience_years_min ?? job.min_experience_years ?? NaN);
+  return Number.isFinite(value) && value >= 0 ? value : null;
+}
+
 function filteredJobs() {
   if (!onboardingReady()) return [];
   const q = state.query.trim().toLowerCase();
@@ -1251,12 +1279,17 @@ function filteredJobs() {
     if (state.jobFilter === "matched" && Number(job.relevance_score || job.score || 0) < 80) return false;
     if (state.jobFilter !== "all" && state.jobFilter !== "matched" && job.status !== state.jobFilter) return false;
     if (state.region && !matchesRegion(job, state.region)) return false;
+    if (state.cityFilter && !matchesCity(job, state.cityFilter)) return false;
+    // Never guess missing salary/experience metadata or convert currencies
+    // silently. These controls are enabled only when verified fields exist.
+    if (state.minSalarySar && (reportedSalaryMin(job) === null || reportedSalaryMin(job) < state.minSalarySar)) return false;
+    if (state.experienceYears && (reportedExperienceYears(job) === null || reportedExperienceYears(job) > state.experienceYears)) return false;
     if (!q) return true;
     return (
-      job.title.toLowerCase().includes(q) ||
-      job.employer.toLowerCase().includes(q) ||
-      job.location.toLowerCase().includes(q) ||
-      job.source.toLowerCase().includes(q)
+      String(job.title || "").toLowerCase().includes(q) ||
+      String(job.employer || "").toLowerCase().includes(q) ||
+      String(job.location || "").toLowerCase().includes(q) ||
+      String(job.source || "").toLowerCase().includes(q)
     );
   });
 }
@@ -1638,6 +1671,11 @@ function renderJobsList() {
   const follow = counts.in_progress || 0;
   const processing = counts.processing || 0;
   const selectedCount = state.selectedJobs.length;
+  const hasReportedSalary = visibleJobs.some((job) => reportedSalaryMin(job) !== null);
+  const hasReportedExperience = visibleJobs.some((job) => reportedExperienceYears(job) !== null);
+  const cityOptions = JOB_CITIES.map(({ key, label }) =>
+    `<option value="${esc(key)}" ${state.cityFilter === key ? "selected" : ""}>${esc(label)}</option>`
+  ).join("");
 
   const tabs = [
     { id: "all", label: `الكل ${total}` },
@@ -1695,6 +1733,19 @@ function renderJobsList() {
     </section>
     <section class="list-toolbar">
       <div class="chips">${tabs}</div>
+      <div class="row" style="flex-wrap:wrap;gap:8px">
+        <select class="select" data-city-filter aria-label="تصفية حسب المدينة">
+          <option value="">كل المدن</option>${cityOptions}
+        </select>
+        <select class="select" data-salary-filter aria-label="الحد الأدنى للراتب بالريال" ${hasReportedSalary ? "" : "disabled title='بيانات الرواتب غير متاحة حالياً'"} >
+          <option value="0">كل الرواتب</option>
+          ${[5000, 10000, 15000, 20000, 30000].map((n) => `<option value="${n}" ${state.minSalarySar === n ? "selected" : ""}>${n.toLocaleString("en-US")} ر.س فأكثر</option>`).join("")}
+        </select>
+        <select class="select" data-experience-filter aria-label="سنوات الخبرة المتاحة لديك" ${hasReportedExperience ? "" : "disabled title='بيانات الخبرة غير متاحة حالياً'"} >
+          <option value="0">كل مستويات الخبرة</option>
+          ${[1, 3, 5, 10, 15].map((n) => `<option value="${n}" ${state.experienceYears === n ? "selected" : ""}>${n} سنوات خبرة</option>`).join("")}
+        </select>
+      </div>
       <div class="row">
         <select class="select" data-sort>
           <option value="score">ترتيب: المطابقة</option>
@@ -2614,6 +2665,18 @@ function setupEvents() {
       render();
     });
   });
+
+  for (const [selector, field, numeric] of [
+    ["[data-city-filter]", "cityFilter", false],
+    ["[data-salary-filter]", "minSalarySar", true],
+    ["[data-experience-filter]", "experienceYears", true],
+  ]) {
+    document.querySelector(selector)?.addEventListener("change", (event) => {
+      state[field] = numeric ? Number(event.target.value) : event.target.value;
+      state.selectedJobs = [];
+      render();
+    });
+  }
 
   document.querySelectorAll("[data-bulk-status]").forEach((item) => {
     item.addEventListener("click", async () => {
