@@ -2,9 +2,9 @@
 
 Cloudflare Worker for full live crawling ingestion:
 
-- **Cron** runs every 30 minutes and enqueues due sources.
-- **Queue** consumes source scan jobs.
-- **D1** stores sources, normalized jobs, scan timestamps, dedupe keys, and errors.
+- **Cron** runs every 10 minutes and enqueues due sources. The standard source refresh interval is six hours.
+- **Queue** processes one source per message.
+- **Storage** uses the PostgreSQL gateway in production and supports D1 for local and legacy environments. It stores sources, normalized jobs, scan timestamps, dedupe keys, and errors.
 - **KV** caches fetched source HTML briefly so retries and smoke tests do not hammer job boards.
 - **HTTP admin/read API** exposes `/health`, `/sources`, `/jobs`, `/match`, `/admin/scan-now`, and `/admin/enqueue-due`. Every `/admin/*` route requires a bearer token.
 - **Clean ingestion** prefers JSON-LD `JobPosting` data, rejects browse/category pages, dedupes jobs, and only returns likely real roles.
@@ -36,6 +36,6 @@ wrangler secret put INGESTION_ADMIN_TOKEN --config workers/ingestion/wrangler.js
 
 ## Notes
 
-LinkedIn/Indeed remain approved-API sources. This worker only scans sources marked `public_html`; anything requiring credentials or prohibited scraping should be integrated through an approved API connector.
+The official Saudi government connector scans the public career sitemaps of ZATCA, EXPRO, SAMA, and MISA. Each listing stores the role, agency, location, dates when published, and the official link where candidates can read the full posting and apply. The government connector is available to the centrally configured sources.
 
-The crawler should not blindly store every link from a job board. Add source-specific parsers for important boards, keep category/navigation pages out of D1, then use DeepSeek/AI Writer on the approved resume and clean job records for matching explanations and tailored documents.
+Jadarat is available as a direct link in the vacancy directory. Integrations for LinkedIn, Indeed, and services requiring credentials use approved APIs.

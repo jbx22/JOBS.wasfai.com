@@ -430,6 +430,7 @@ function connectorModeLabel(mode) {
       lever: "لوحة Lever",
       ashby: "لوحة Ashby",
       workable: "لوحة Workable",
+      saudi_government: "بوابة حكومية رسمية",
       approved_api: "يتطلب API معتمد",
       portal_only: "بوابة موثقة — فتح مباشر",
       unsupported: "موصل غير متاح",

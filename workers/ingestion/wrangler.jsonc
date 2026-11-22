@@ -5,7 +5,7 @@
   "compatibility_date": "2026-07-13",
   "compatibility_flags": ["nodejs_compat"],
   "triggers": {
-    "crons": ["*/30 * * * *"]
+    "crons": ["*/10 * * * *"]
   },
   "vars": {
     "ENVIRONMENT": "production",
@@ -35,7 +35,7 @@
     "consumers": [
       {
         "queue": "jobs-wasfai-scan-queue",
-        "max_batch_size": 5,
+          "max_batch_size": 1,
         "max_batch_timeout": 30
       }
     ]
