@@ -1364,6 +1364,9 @@ function renderTopbar(subtitle = "جاهز للبحث والتقديم") {
         <button class="avatar user-menu-trigger" data-user-menu aria-label="القائمة والحساب" aria-expanded="false">${esc(initial)}</button>
         <div class="user-menu" data-user-menu-panel hidden>
           <button data-nav="${state.session?.authenticated ? "/account" : "/login"}">${iconUser()} <span>${state.session?.authenticated ? "الحساب" : "تسجيل الدخول / إنشاء حساب"}</span></button>
+          <button data-open-url="/vacancies">${iconList()} <span>الوظائف العامة</span></button>
+          <button data-open-url="/employers">${iconUser()} <span>أصحاب العمل</span></button>
+          <button data-open-url="/applications">${iconList()} <span>طلبات التوظيف</span></button>
           <button data-open-url="/pricing/">${iconSpark()} <span>الاشتراكات</span></button>
         </div>
       </div>

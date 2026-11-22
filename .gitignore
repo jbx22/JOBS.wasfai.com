@@ -46,3 +46,9 @@ jds/
 interview-prep/
 voice/
 plugins.local/
+
+# Cloudflare local-only secrets
+.dev.vars
+.dev.vars.*
+.env.*
+!.env.example

@@ -8,6 +8,8 @@ export async function onRequestPost(context) {
     return json({ error: "Not found.", code: "NOT_FOUND" }, 404);
   }
   if (!getJobDb(context.env)) return json({ error: "Account storage is unavailable.", code: "STORAGE_NOT_CONFIGURED" }, 503);
+  const config = authConfig(context.env || {}, context.request);
+  if (!config.cookieSecret) return json({ error: "Session signing is unavailable.", code: "AUTH_NOT_CONFIGURED" }, 503);
   const user = {
     sub: "qa-production-release-gate",
     email: "qa-release@jobs.wasfai.com",
@@ -26,9 +28,10 @@ export async function onRequestPost(context) {
   await getJobDb(context.env).prepare(`
     INSERT INTO users (id, email, display_name, provider, accepted_terms_at, onboarding_completed_at)
     VALUES (?, ?, ?, 'qa', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-    ON CONFLICT(id) DO UPDATE SET last_login_at=CURRENT_TIMESTAMP, account_status='active'
+    ON CONFLICT(id) DO UPDATE SET last_login_at=CURRENT_TIMESTAMP WHERE users.account_status = 'active'
   `).bind(user.sub, user.email, user.name).run();
-  const config = authConfig(context.env || {}, context.request);
+  const account = await getJobDb(context.env).prepare("SELECT account_status FROM users WHERE id = ?").bind(user.sub).first();
+  if (account?.account_status !== "active") return json({ error: "This account is restricted.", code: "ACCOUNT_RESTRICTED" }, 403);
   return json({ authenticated: true, user }, 200, {
     "Set-Cookie": await sessionCookie(user, config.cookieSecret),
   });

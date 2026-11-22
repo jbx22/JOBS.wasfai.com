@@ -1,4 +1,4 @@
-const CACHE_NAME = "jobs-wasfai-v55-moyasar-subscriptions";
+const CACHE_NAME = "jobs-wasfai-v59-auth-recruitment";
 const APP_SHELL = [
   "/",
   "/app",
@@ -49,7 +49,7 @@ self.addEventListener("fetch", (event) => {
   // with a versioned cached fallback for resilient read-only offline access.
   if (url.origin === self.location.origin && (event.request.mode === "navigate" || /\/app\.js$/.test(url.pathname))) {
     event.respondWith(fetch(event.request, { cache: "no-store" }).then((response) => {
-      if (response.ok) caches.open(CACHE_NAME).then((cache) => cache.put(event.request, response.clone()));
+      if (response.ok && !/no-store|private/i.test(response.headers.get("Cache-Control") || "")) caches.open(CACHE_NAME).then((cache) => cache.put(event.request, response.clone()));
       return response;
     }).catch(async () => {
       const cached = await caches.match(event.request);

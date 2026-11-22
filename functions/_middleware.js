@@ -1,3 +1,5 @@
+import { AuthError, clearSessionCookie, readActiveSession } from "./api/auth/_auth.js";
+
 const SECURITY_HEADERS = {
   "X-Content-Type-Options": "nosniff",
   "Referrer-Policy": "strict-origin-when-cross-origin",
@@ -54,6 +56,18 @@ export async function onRequest(context) {
     }
   }
 
+  // Revalidate signed sessions against durable status on every API request.
+  const authFlow = ["/api/auth/google/start", "/api/auth/google/callback", "/api/auth/logout", "/api/auth/qa", "/api/auth/session"].includes(url.pathname);
+  if (isApi && !authFlow) {
+    try {
+      await readActiveSession(context.request, context.env || {});
+    } catch (error) {
+      if (!(error instanceof AuthError)) throw error;
+      const response = apiError(error.message, error.code, error.status);
+      if (error.status < 500) response.headers.append("Set-Cookie", clearSessionCookie());
+      return withSecurityHeaders(response, true);
+    }
+  }
   const response = await context.next();
   return withSecurityHeaders(response, isApi);
 }

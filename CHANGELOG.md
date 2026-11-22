@@ -224,3 +224,10 @@
 ## jobs58 — 2026-09-14 00:25
 
 - Add a first-class public release marker: `functions/api/version.js` publishes the `JOBS_RELEASE` constant ("jobs58") at `GET /api/version`, with an `x-jobs-release` response header, no-store caching and a 405 for mutating methods. Unauthenticated and secret-free; nothing beyond the version string is disclosed. The service worker `CACHE_NAME` is no longer the only deployed release identity. Pinned by `test/release-marker.test.mjs`, which fails if the constant drifts from `VERSION.json`.
+
+
+## jobs59 — 2026-11-22
+
+- Repair Google OAuth and durable account restrictions; add moderated employer recruitment, private applications, verified public job pages and sitemaps; enforce admin scopes and idempotent payment activation.
+- Retain shared application CVs when a candidate uploads a newer CV; keep the existing Pages, VPS PostgreSQL gateway and encrypted R2 store.
+- Add regression coverage and CI with PostgreSQL 16; rollout instructions are in docs/RELEASE-JOBS59.md.

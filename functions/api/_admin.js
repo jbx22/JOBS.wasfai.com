@@ -1,4 +1,4 @@
-import { authConfig, readSession } from "./auth/_auth.js";
+import { readActiveSession } from "./auth/_auth.js";
 import { json } from "./_state.js";
 import { getJobDb } from "./_db.js";
 
@@ -118,8 +118,8 @@ export async function requireAdmin(context, options = {}) {
       },
     };
   }
-  const config = authConfig(context.env || {}, context.request);
-  const session = await readSession(context.request, config.cookieSecret);
+  const active = await readActiveSession(context.request, context.env || {});
+  const session = active?.session;
   if (!session) return { error: json({ error: "Sign in with Google to access admin.", code: "AUTH_REQUIRED" }, 401) };
   await ensureAdminSchema(db);
   const email = String(session.email || "").trim().toLowerCase();
@@ -142,6 +142,17 @@ export async function requireAdmin(context, options = {}) {
   if (!member) return { error: json({ error: "This Google account is not an active admin.", code: "ADMIN_REQUIRED" }, 403) };
   if (options.superAdmin && member.role !== "super_admin") {
     return { error: json({ error: "Super admin permission is required.", code: "SUPER_ADMIN_REQUIRED" }, 403) };
+  }
+  const requiredScope = options.scope || ({
+    overview: "reports", users: "users", subscribers: "subscribers", plans: "subscribers",
+    payments: "billing", ai: "ai", audit: "audit", admins: "admins", employers: "employers", jobs: "jobs",
+  })[new URL(context.request.url).pathname.split("/")[3]];
+  if (requiredScope && member.role !== "super_admin") {
+    let scopes = [];
+    try { scopes = JSON.parse(member.scopes); } catch { /* Deny malformed grants. */ }
+    if (!Array.isArray(scopes) || !scopes.includes(requiredScope)) {
+      return { error: json({ error: "Permission is required for this action.", code: "SCOPE_REQUIRED" }, 403) };
+    }
   }
   await db.prepare("UPDATE admin_memberships SET user_id = ?, display_name = ?, last_active_at = CURRENT_TIMESTAMP WHERE email = ?")
     .bind(session.sub, session.name || member.display_name || "", email).run();

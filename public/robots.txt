@@ -1,5 +1,10 @@
 User-agent: *
 Allow: /
 Disallow: /api/
+Disallow: /admin/
+Disallow: /super-admin/
+Disallow: /recruitment-admin
+Disallow: /employers
+Disallow: /applications
 
 Sitemap: https://jobs.wasfai.com/sitemap.xml
