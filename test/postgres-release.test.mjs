@@ -1,6 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { USERS_SCHEMA, sessionCookie } from "../functions/api/auth/_auth.js";
 import { translateSql } from "../vps/db-gateway/sql.mjs";
 import { onRequest as recruitment } from "../functions/api/recruitment/[[route]].js";
@@ -49,6 +51,20 @@ test("PostgreSQL: OAuth, employer moderation, public filters and invoice replay 
     await db.prepare(USERS_SCHEMA).run();
     const schema = readFileSync(new URL("../workers/ingestion/schema.sql", import.meta.url), "utf8");
     for (const sql of schema.split(";").map((item) => item.trim()).filter(Boolean)) await db.prepare(sql).run();
+    await ensureSubscriptionSchema(db);
+    const plan = planById("gold_monthly");
+    const legacyEnd = "2026-12-01";
+    await db.prepare("INSERT INTO subscriptions(user_id,plan,status,current_period_end) VALUES(?,?,?,?)")
+      .bind("legacy-user", plan.id, "active", legacyEnd).run();
+    await db.prepare("INSERT INTO subscription_payments(user_id,plan,provider_invoice_id,status) VALUES(?,?,?,?)")
+      .bind("legacy-user", plan.id, "legacy-invoice", "paid").run();
+    const migrationScript = fileURLToPath(new URL("../tools/migration/jobs59-postgres.mjs", import.meta.url));
+    const migrationSql = execFileSync(process.execPath, [migrationScript], { encoding: "utf8" });
+    await client.query(migrationSql);
+    await client.query(migrationSql);
+    const legacyInvoice = { id: "legacy-invoice", status: "paid", amount: 5000, currency: "SAR", metadata: { user_id: "legacy-user", plan: plan.id } };
+    assert.equal((await activatePaidSubscription(db, "legacy-user", plan, legacyInvoice)).already_activated, true);
+    assert.equal((await db.prepare("SELECT current_period_end FROM subscriptions WHERE user_id=?").bind("legacy-user").first()).current_period_end, legacyEnd);
     const oauth = await callback({ env: testEnv, request: new Request("https://jobs.wasfai.com/api/auth/google/callback?code=test&state=state", {
       headers: { Cookie: "jobs_oauth_state=state; jobs_oauth_pkce=" + "a".repeat(64) },
     }) });
@@ -74,9 +90,7 @@ test("PostgreSQL: OAuth, employer moderation, public filters and invoice replay 
     const jobId = (await create.json()).id;
     assert.equal((await call(owner, "moderation/jobs/" + jobId, "PATCH", { status: "published", review_note: "Approved for release test" })).status, 200);
     assert.equal((await listPublicJobs(testEnv, { city: "riyadh", min_salary: "12000", experience: "5" })).length, 1);
-    const plan = planById("gold_monthly");
     const invoice = { id: "pg-invoice", status: "paid", amount: 5000, currency: "SAR", metadata: { user_id: employer.sub, plan: plan.id } };
-    await ensureSubscriptionSchema(db);
     await activatePaidSubscription(db, employer.sub, plan, invoice);
     const replay = await activatePaidSubscription(db, employer.sub, plan, invoice);
     assert.equal(replay.already_activated, true);
