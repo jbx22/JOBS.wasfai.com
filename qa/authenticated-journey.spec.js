@@ -19,7 +19,7 @@ test("authenticated resume-to-export release gate", async ({ request }) => {
     resume_skills: "Project management, mechanical engineering, operations, maintenance, CAPEX",
     resume_languages: "Arabic, English",
     resume_seniority: "Senior",
-    resume_text: "Production QA resume. Senior industrial project and mechanical engineering professional experienced in operations, maintenance, CAPEX, risk, schedules, and stakeholder management.",
+    resume_text: "Production QA résumé. Managed industrial capital projects for six years. Delivered a factory upgrade with a SAR 5 million budget. Tracked scope, risk, schedule, and spending in weekly reports. Coordinated mechanical installation, handover, and commissioning with site teams. Prepared schedules, ran progress meetings, and maintained the project risk register.",
     resume_filename: "production-qa-resume.txt",
   };
   const savedState = { ...workspace.state, profile };
@@ -30,15 +30,20 @@ test("authenticated resume-to-export release gate", async ({ request }) => {
   expect(matchResponse.ok()).toBeTruthy();
   const match = await matchResponse.json();
   expect(Array.isArray(match.jobs)).toBeTruthy();
-  const job = match.jobs[0] || workspace.state.jobs?.[0];
-  expect(job).toBeTruthy();
+  const job = {
+    id: "qa-industrial-capital-project-manager",
+    title: "Industrial Capital Project Manager",
+    employer: "Production QA Industries",
+    description: "At least three years of industrial capital project management are required. Applicants must have experience tracking project scope, risks, schedules, and costs. Mechanical installation and commissioning coordination are preferred.",
+  };
   const generation = await request.post(`${BASE_URL}/api/ghostwriter`, {
     data: { job, profile, ai_model: "deepseek" }, timeout: 120_000,
   });
   if (!generation.ok()) throw new Error(`generation failed: ${generation.status()} ${await generation.text()}`);
   const kit = await generation.json();
   expect(kit.provider).not.toBe("template");
-  expect(kit.quality_review).toBeTruthy();
+  expect(kit.quality_review.requirements).not.toHaveLength(0);
+  expect(kit.quality_review.approved, kit.quality_review.reviewer_summary).toBe(true);
 
   const pdf = await request.post(`${BASE_URL}/api/export-package`, {
     data: { format: "pdf", job, profile, kit }, timeout: 45_000,

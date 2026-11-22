@@ -255,3 +255,6 @@
 ## jobs67 — 2026-11-22 20:58
 
 - Repair résumé coaching and upgrade to DeepSeek V4.1 Flash
+## jobs68 — 2026-11-22 21:20
+
+- Ground job-specific résumés and letters in requirement evidence

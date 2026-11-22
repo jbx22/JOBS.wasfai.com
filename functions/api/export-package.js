@@ -73,6 +73,9 @@ function validatePayload(job, profile, kit) {
   if (missingJob.length) {
     return json({ error: "Missing job id, title, or employer.", code: "BAD_REQUEST", missing: missingJob }, 400);
   }
+  if (kit.job_id && String(kit.job_id) !== String(job.id)) {
+    return json({ error: "This application kit belongs to a different job.", code: "BAD_REQUEST" }, 400);
+  }
   if (!String(profile.display_name || "").trim()) {
     return json({ error: "Missing subscriber profile name.", code: "BAD_REQUEST", missing: ["profile.display_name"] }, 400);
   }
@@ -130,12 +133,6 @@ function packageText(job, profile, kit) {
     "",
     "INTERVIEW PREP - EN",
     ...(kit.en_interview_prep || []),
-    "",
-    "KEYWORD GAPS",
-    ...(kit.keyword_gaps || []),
-    "",
-    "NEXT ACTIONS",
-    ...(kit.next_actions || []),
   ]
     .filter((x) => x != null)
     .join("\n");
