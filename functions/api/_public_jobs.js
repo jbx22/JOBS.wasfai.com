@@ -1,4 +1,5 @@
-import { matchJob, normalizeProfile } from "../../workers/ingestion/src/index.js";
+import { cityAliases, matchJob, normalizeProfile } from "../../workers/ingestion/src/index.js";
+import { GOVERNMENT_BOARDS } from "../../workers/ingestion/src/boards.js";
 import { getJobDb } from "./_db.js";
 import { ensureRecruitmentSchema, invalid } from "./_recruitment.js";
 
@@ -27,6 +28,11 @@ function publicQuery(filters = {}) {
   for (const [key, column] of [["q", "title"], ["city", "city"], ["profession", "profession"]]) {
     const value = String(filters[key] || "").trim().slice(0, 120).toLowerCase();
     if (value) {
+      if (key === "city") {
+        const cities = cityAliases(value).map((city) => "LOWER(city) LIKE " + bind("%" + city + "%"));
+        conditions.push("(" + cities.join(" OR ") + ")");
+        continue;
+      }
       const placeholder = bind("%" + value + "%");
       conditions.push(key === "q" ? "(LOWER(title) LIKE " + placeholder + " OR LOWER(description) LIKE " + placeholder + ")" : "LOWER(" + column + ") LIKE " + placeholder);
     }
@@ -41,6 +47,9 @@ function publicQuery(filters = {}) {
     const experience = Number(filters.experience);
     if (!Number.isInteger(experience) || experience < 0 || experience > 50) throw invalid("Experience filter is invalid.");
     conditions.push("experience_min <= " + bind(experience));
+  }
+  if (filters.sector === "government") {
+    conditions.push("source_id IN (" + GOVERNMENT_BOARDS.map((board) => bind(board.id)).join(",") + ")");
   }
   if (filters.id) {
     conditions.push("id=" + bind(filters.id));
@@ -63,7 +72,7 @@ export async function listPublicJobs(env, filters = {}, limit = 40, offset = 0) 
   const start = Math.max(0, Math.min(Number.isInteger(offset) ? offset : 0, 1000000));
   query.values.push(max, start);
   const { results = [] } = await db.prepare(query.sql + " ORDER BY COALESCE(NULLIF(published_at,''),discovered_at) DESC, kind, id LIMIT ?" + (query.values.length - 1) + " OFFSET ?" + query.values.length).bind(...query.values).all();
-  return results.map((row) => ({ ...row, public_id: (row.kind === "employer" ? "e-" : "i-") + row.id }));
+  return results.map((row) => ({ ...row, government: GOVERNMENT_BOARDS.some((board) => board.id === row.source_id), public_id: (row.kind === "employer" ? "e-" : "i-") + row.id }));
 }
 
 export async function countPublicJobs(env) {

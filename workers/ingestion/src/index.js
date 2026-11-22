@@ -1,5 +1,11 @@
 import { getJobDb } from "./_db.js";
-import { ensureEmployerBoards, SOURCE_CONNECTORS } from "./boards.js";
+import { CENTRAL_BOARDS, ensureEmployerBoards, GOVERNMENT_BOARDS, GOVERNMENT_CONNECTOR, SOURCE_CONNECTORS } from "./boards.js";
+import { parseGovernmentPosting, parseGovernmentSitemap } from "./government.js";
+
+const GOV_JOBS_PER_SCAN = 24;
+const DESCRIPTION_LIMIT = 6000;
+const BATCH_BYTES = 30_000;
+const encoder = new TextEncoder();
 /**
  * JOBS.wasfai.com ingestion worker
  *
@@ -38,13 +44,15 @@ export default {
     }
     if (url.pathname === "/sources" && request.method === "GET") {
       const { results } = await getJobDb(env).prepare("SELECT id, label, url, region, connector_mode, last_scanned_at, next_scan_at, last_error FROM sources WHERE visibility = 'central' AND owner_user_id = '' AND enabled = 1 ORDER BY label").all();
-      return json({ ok: true, sources: results.map(withSourceQuality) });
+      return json({ ok: true, sources: results.map((source) => withSourceQuality({ ...source,
+        url: CENTRAL_BOARDS.find((board) => board.id === source.id)?.portal || source.url,
+      })) });
     }
     if (url.pathname === "/jobs" && request.method === "GET") {
       const limit = Math.max(1, Math.min(Math.floor(Number(url.searchParams.get("limit")) || 50), 100));
       const { results } = await getJobDb(env).prepare(
-        "SELECT j.* FROM jobs j JOIN sources s ON s.id = j.source_id WHERE s.visibility = 'central' AND s.owner_user_id = '' AND s.enabled = 1 AND j.verification_status = 'live' AND j.closed_at = '' AND (j.valid_through = '' OR j.valid_through >= ?1) AND j.last_verified_at >= ?2 ORDER BY score DESC, discovered_at DESC LIMIT ?3",
-      ).bind(new Date().toISOString(), new Date(Date.now() - 7 * 86400000).toISOString(), limit).all();
+        "SELECT j.* FROM jobs j JOIN sources s ON s.id = j.source_id WHERE s.visibility = 'central' AND s.owner_user_id = '' AND s.enabled = 1 AND j.verification_status = 'live' AND j.closed_at = '' AND (j.valid_through = '' OR j.valid_through >= ?1) AND j.last_verified_at >= ?2 AND (?4='' OR j.sector=?4) ORDER BY score DESC, discovered_at DESC LIMIT ?3",
+      ).bind(new Date().toISOString(), new Date(Date.now() - 7 * 86400000).toISOString(), limit, url.searchParams.get("sector") === "government" ? "government" : "").all();
       return json({ ok: true, jobs: results.filter(isLikelyStoredJob).map((job) => ({ ...job, data_quality: "live_verified", source_quality: "live_verified" })) });
     }
     if (url.pathname === "/match" && request.method === "POST") {
@@ -128,40 +136,88 @@ async function enqueueDueSources(env) {
 }
 
 async function scanSource(env, source) {
-  if (!source || !SOURCE_CONNECTORS.includes(source.connector_mode)) {
+  const government = source?.connector_mode === GOVERNMENT_CONNECTOR;
+  if (!source || (!government && !SOURCE_CONNECTORS.includes(source.connector_mode))) {
     throw new Error("Unsupported connector mode.");
   }
-  const payload = await fetchSourcePayload(env, source);
-  const jobs = parseSourcePayload(payload, source).slice(0, 100);
+  const result = government ? await fetchGovernmentJobs(source) : { jobs: parseSourcePayload(await fetchSourcePayload(env, source), source).slice(0, 100) };
   const now = new Date().toISOString();
-  let inserted = 0;
-  for (const job of jobs) {
-    const dedupe = dedupeKey(source.id, job.title, job.employer, job.location);
-    const id = `${source.id}-${hash(dedupe).slice(0, 12)}`;
+  const jobs = result.jobs.filter((job) => !job.valid_through || job.valid_through >= now);
+  const db = getJobDb(env);
+  const writes = jobs.map((job) => {
+    const dedupe = government ? `${source.id}|${job.requisition}` : dedupeKey(source.id, job.title, job.employer, job.location);
+    const id = `${source.id}-${government ? job.requisition : hash(dedupe).slice(0, 12)}`;
     const metadata = classifyJob(job);
-    const result = await getJobDb(env).prepare(
-      `INSERT INTO jobs
+    return db.prepare(`INSERT INTO jobs
         (id, source_id, source_url, title, employer, location, description, score, status, discovered_at, updated_at, dedupe_key,
          posted_at, valid_through, last_verified_at, verification_status, closed_at, canonical_employer, role_family, seniority, sector)
        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'discovered', ?9, ?9, ?10, ?11, ?12, ?9, 'live', '', ?13, ?14, ?15, ?16)
-       ON CONFLICT(dedupe_key) DO UPDATE SET source_url=excluded.source_url, description=excluded.description,
+       ON CONFLICT(dedupe_key) DO UPDATE SET source_url=excluded.source_url, title=excluded.title,
+         employer=excluded.employer, location=excluded.location, description=excluded.description, score=excluded.score,
          updated_at=excluded.updated_at, last_verified_at=excluded.last_verified_at, verification_status='live', closed_at='',
          valid_through=excluded.valid_through, posted_at=excluded.posted_at, canonical_employer=excluded.canonical_employer,
          role_family=excluded.role_family, seniority=excluded.seniority, sector=excluded.sector`,
-    )
-      .bind(id, source.id, job.url || source.url, job.title, job.employer, job.location, job.description, job.score, now, dedupe,
-        job.posted_at || "", job.valid_through || "", metadata.employer, metadata.role_family, metadata.seniority, metadata.sector)
-      .run();
-    inserted += result.meta?.changes || 0;
-  }
+    ).bind(id, source.id, job.url || source.url, job.title, job.employer, job.location, job.description, job.score, now, dedupe,
+      job.posted_at || "", job.valid_through || "", metadata.employer, metadata.role_family, metadata.seniority, government ? "government" : metadata.sector);
+  });
+  const inserted = await writeJobBatches(db, writes);
   const next = new Date(Date.now() + Number(source.interval_minutes || 360) * 60_000).toISOString();
-  await getJobDb(env).prepare(
-    "UPDATE sources SET last_scanned_at = ?1, next_scan_at = ?2, last_error = '', updated_at = ?1 WHERE id = ?3",
-  ).bind(now, next, source.id).run();
-  await archiveStaleJobs(env, source.id, now);
+  await db.prepare(
+    "UPDATE sources SET last_scanned_at = ?1, next_scan_at = ?2, last_error = ?3, updated_at = ?1 WHERE id = ?4",
+  ).bind(now, next, result.warning || "", source.id).run();
+  const grace = government && result.complete ? 2 * Number(source.interval_minutes || 360) * 60_000 : 14 * 86400_000;
+  await archiveStaleJobs(env, source.id, now, grace);
   await incrementMetric(env, "scan_success", source.id);
   await incrementMetric(env, "jobs_parsed", source.id, jobs.length);
   return { scanned: source.id, scanned_at: now, parsed: jobs.length, inserted };
+}
+
+async function writeJobBatches(db, statements) {
+  let jobs = [];
+  let bytes = 32;
+  let written = 0;
+  for (const statement of statements) {
+    const size = encoder.encode(JSON.stringify({ sql: statement.sql, params: statement.params, mode: "run" })).length + 1;
+    if (jobs.length && bytes + size > BATCH_BYTES) {
+      const results = await db.batch(jobs);
+      written += results.reduce((count, row) => count + Number(row.meta?.changes || 0), 0);
+      jobs = [];
+      bytes = 32;
+    }
+    jobs.push(statement);
+    bytes += size;
+  }
+  if (jobs.length) {
+    const results = await db.batch(jobs);
+    written += results.reduce((count, row) => count + Number(row.meta?.changes || 0), 0);
+  }
+  return written;
+}
+
+async function fetchGovernmentJobs(source) {
+  const board = GOVERNMENT_BOARDS.find((item) => item.id === source.id && item.url === source.url);
+  if (!board || source.visibility !== "central" || source.owner_user_id) throw new Error("Unregistered government source");
+  const xml = await fetchPublicPayload(board.url, /(?:application|text)\/xml/, { official: true });
+  const links = parseGovernmentSitemap(xml, board);
+  const blocks = Math.ceil(links.length / GOV_JOBS_PER_SCAN) || 1;
+  const block = Math.floor(Date.now() / (Number(source.interval_minutes || 360) * 60_000)) % blocks;
+  const start = block * GOV_JOBS_PER_SCAN;
+  const batch = links.slice(start, start + GOV_JOBS_PER_SCAN);
+  const jobs = [];
+  const errors = [];
+  for (const link of batch) {
+    try {
+      const html = await fetchPublicPayload(link.url, /text\/html/, { official: true, missingOk: true });
+      if (!html) continue;
+      const job = parseGovernmentPosting(html, link, board);
+      if (job) jobs.push(job);
+    } catch (error) {
+      errors.push(error);
+    }
+  }
+  if (errors.length && errors.length === batch.length) throw errors[0];
+  const warning = errors.length ? `Official board: ${errors.length} of ${batch.length} details could not be verified` : "";
+  return { jobs, warning, complete: blocks === 1 && !errors.length };
 }
 
 async function fetchSourcePayload(env, source) {
@@ -169,40 +225,55 @@ async function fetchSourcePayload(env, source) {
   const cacheKey = `source-html:${source.id}:${hash(source.url)}`;
   const cached = env.JOBS_CACHE ? await env.JOBS_CACHE.get(cacheKey) : "";
   if (cached) return cached;
-  const response = await fetchWithSafeRedirects(source.url, {
-    headers: {
-      "User-Agent": "JOBS.wasfai.com ingestion bot; contact=admin@wasfai.com",
-      "Accept": "text/html,application/xhtml+xml,application/json",
-    },
-  });
-  if (!response.ok) throw new Error(`source returned ${response.status}`);
-  const type = String(response.headers.get("content-type") || "").toLowerCase();
-  if (!/(?:text\/html|application\/(?:json|ld\+json)|text\/plain)/.test(type)) throw new Error(`unsupported source content type: ${type || "unknown"}`);
-  const declaredLength = Number(response.headers.get("content-length") || 0);
-  if (declaredLength > 2_000_000) throw new Error("source response exceeds 2 MB limit");
-  const html = await readLimitedText(response, 2_000_000);
+  const html = await fetchPublicPayload(source.url, /(?:text\/html|application\/(?:json|ld\+json)|text\/plain)/);
   if (env.JOBS_CACHE) {
     await env.JOBS_CACHE.put(cacheKey, html, { expirationTtl: 900 });
   }
   return html;
 }
 
+async function fetchPublicPayload(url, contentType, { official = false, missingOk = false } = {}) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 12_000);
+  try {
+    const options = { signal: controller.signal, headers: {
+      "User-Agent": "JOBS.wasfai.com ingestion bot; contact=admin@wasfai.com",
+      Accept: "text/html,application/xhtml+xml,application/json,application/xml,text/xml",
+    } };
+    const response = official ? await fetch(url, { ...options, redirect: "manual" }) : await fetchWithSafeRedirects(url, options);
+    if (missingOk && [404, 410].includes(response.status)) return "";
+    if (!response.ok) throw new Error(`source returned ${response.status}`);
+    const type = String(response.headers.get("content-type") || "").toLowerCase();
+    if (!contentType.test(type)) throw new Error(`unsupported source content type: ${type || "unknown"}`);
+    if (Number(response.headers.get("content-length")) > 2_000_000) throw new Error("source response exceeds 2 MB limit");
+    return await readLimitedText(response, 2_000_000);
+  } finally { clearTimeout(timer); }
+}
+
 export function parseSourcePayload(payload, source) {
   const parsers = { public_html: parseJobs, public_json: parseJsonFeed, greenhouse: parseGreenhouse,
     lever: parseLever, ashby: parseAshby, workable: parseWorkable };
-  return (parsers[source.connector_mode] || parseJsonFeed)(payload, source).filter((job) => safeHttpUrl(job.url));
+  return (parsers[source.connector_mode] || parseJsonFeed)(payload, source)
+    .filter((job) => job.url.length <= 2048 && safeHttpUrl(job.url))
+    .map((job) => ({
+      ...job,
+      title: job.title.slice(0, 240),
+      employer: clean(job.employer).slice(0, 200),
+      location: job.location.slice(0, 240),
+    }));
 }
 
 function parseJsonFeed(text, source) {
   let data;
   try { data = JSON.parse(text); } catch { throw new Error("public JSON source returned invalid JSON"); }
   const rows = Array.isArray(data?.jobs) ? data.jobs : Array.isArray(data) ? data : [];
-  return uniqueJobs(rows.map((row) => ({
+  if (!Array.isArray(data) && !Array.isArray(data?.jobs)) throw new Error("Public JSON response did not contain a job list");
+  return uniqueJobs(rows.filter((row) => row && typeof row === "object").map((row) => ({
     title: clean(row.title || row.name || ""),
     employer: clean(row.company_name || row.company || source.label),
     location: clean(row.candidate_required_location || row.location || source.region || "Remote"),
-    url: safeJobUrl(row.url || row.job_url || source.url, source.url),
-    description: stripHtml(row.description || row.description_text || "").slice(0, 1200),
+    url: safeJobUrl(row.url || row.job_url, source.url),
+    description: jobDescription(row.description || row.description_text),
     posted_at: isoDate(row.publication_date || row.created_at || row.published_at),
     valid_through: isoDate(row.valid_through || row.expiration_date || row.deadline),
     score: scoreJob(`${row.title || ""} ${row.company_name || row.company || ""} ${row.candidate_required_location || row.location || ""} ${row.description || ""}`, source),
@@ -212,19 +283,20 @@ function parseJsonFeed(text, source) {
 function parseGreenhouse(text, source) {
   const data = JSON.parse(text);
   if (!Array.isArray(data?.jobs)) throw new Error("Greenhouse response did not contain a job list");
-  return uniqueJobs(data.jobs.map((row) => ({
+  return uniqueJobs(data.jobs.filter((row) => row && typeof row === "object").map((row) => ({
     title: clean(row.title), employer: source.label, location: clean(row.location?.name || source.region),
-    url: safeJobUrl(row.absolute_url, source.url), description: stripHtml(decodeHtml(row.content || "")).slice(0, 1200),
+    url: safeJobUrl(row.absolute_url, source.url), description: jobDescription(decodeHtml(row.content || "")),
     posted_at: isoDate(row.first_published), valid_through: "", score: scoreJob(`${row.title} ${row.content || ""}`, source),
   }))).filter(isLikelyParsedJob);
 }
 
 function parseLever(text, source) {
   const rows = JSON.parse(text);
-  return uniqueJobs((Array.isArray(rows) ? rows : []).map((row) => ({
+  if (!Array.isArray(rows)) throw new Error("Lever response did not contain a job list");
+  return uniqueJobs(rows.filter((row) => row && typeof row === "object").map((row) => ({
     title: clean(row.text), employer: source.label, location: clean(row.categories?.location || source.region),
-    url: safeJobUrl(row.hostedUrl || row.applyUrl, source.url), description: stripHtml(row.descriptionPlain || row.description || "").slice(0, 1200),
-    posted_at: row.createdAt ? new Date(Number(row.createdAt)).toISOString() : "", valid_through: "",
+    url: safeJobUrl(row.hostedUrl || row.applyUrl, source.url), description: jobDescription(row.descriptionPlain || row.description),
+    posted_at: isoDate(Number(row.createdAt)), valid_through: "",
     score: scoreJob(`${row.text} ${row.categories?.team || ""} ${row.descriptionPlain || ""}`, source),
   }))).filter(isLikelyParsedJob);
 }
@@ -232,9 +304,9 @@ function parseLever(text, source) {
 function parseAshby(text, source) {
   const data = JSON.parse(text);
   if (!Array.isArray(data?.jobs)) throw new Error("Ashby response did not contain a job list");
-  return uniqueJobs(data.jobs.filter((row) => row.isListed !== false).map((row) => ({
+  return uniqueJobs(data.jobs.filter((row) => row && row.isListed !== false).map((row) => ({
     title: clean(row.title), employer: source.label, location: clean(row.location || source.region),
-    url: safeJobUrl(row.jobUrl || row.applyUrl, source.url), description: stripHtml(row.descriptionPlain || row.descriptionHtml || "").slice(0, 1200),
+    url: safeJobUrl(row.jobUrl || row.applyUrl, source.url), description: jobDescription(row.descriptionPlain || row.descriptionHtml),
     posted_at: isoDate(row.publishedAt), valid_through: isoDate(row.validThrough),
     score: scoreJob(`${row.title} ${row.department || ""} ${row.descriptionPlain || ""}`, source),
   }))).filter(isLikelyParsedJob);
@@ -243,7 +315,7 @@ function parseAshby(text, source) {
 function parseWorkable(text, source) {
   const data = JSON.parse(text);
   if (!Array.isArray(data?.jobs)) throw new Error("Workable response did not contain a job list");
-  return uniqueJobs(data.jobs.map((row) => {
+  return uniqueJobs(data.jobs.filter((row) => row && typeof row === "object").map((row) => {
     const publishedLocations = Array.isArray(row.locations) ? row.locations.filter((item) => item && !item.hidden) : [];
     const locations = publishedLocations.map(({ city, country }) => [city, country].filter(Boolean).join(", "));
     const location = Array.isArray(row.locations) && row.locations.length
@@ -251,7 +323,7 @@ function parseWorkable(text, source) {
     return {
       title: clean(row.title), employer: source.label, location: clean(location),
       url: safeJobUrl(row.url || row.shortlink, source.url),
-      description: stripHtml(row.description || [row.department, row.employment_type, row.experience].filter(Boolean).join(" · ")).slice(0, 1200),
+      description: jobDescription(row.description || [row.department, row.employment_type, row.experience].filter(Boolean).join(" · ")),
       posted_at: isoDate(row.published_on), valid_through: "", score: scoreJob(`${row.title} ${location}`, source),
     };
   })).filter(isLikelyParsedJob);
@@ -281,12 +353,12 @@ function normalizeCard(card, source) {
   const employer = pick(card, [/(?:company|employer)["'][^>]*>(.*?)</i, /<strong[^>]*>(.*?)<\/strong>/i]) || source.label;
   const location = pick(card, [/(?:location|city)["'][^>]*>(.*?)</i]) || source.region || "";
   const href = pick(card, [/<a[^>]+href=["']([^"']+)["']/i]);
-  const description = stripHtml(card).slice(0, 800);
+  const description = jobDescription(card);
   return {
     title: clean(title),
     employer: clean(employer),
     location: clean(location),
-    url: href ? new URL(href, source.url).toString() : source.url,
+    url: safeJobUrl(href, source.url),
     description,
     score: scoreJob(`${title} ${employer} ${location} ${description}`, source),
   };
@@ -317,14 +389,14 @@ function collectJsonLdJobs(node, source, jobs) {
   if (Array.isArray(node["@graph"])) collectJsonLdJobs(node["@graph"], source, jobs);
   const type = Array.isArray(node["@type"]) ? node["@type"].join(" ") : String(node["@type"] || "");
   if (!/JobPosting/i.test(type)) return;
-  const employer = typeof node.hiringOrganization === "object" ? node.hiringOrganization.name : node.hiringOrganization;
+  const employer = typeof node.hiringOrganization === "object" ? node.hiringOrganization?.name : node.hiringOrganization;
   const location = normalizeJsonLocation(node.jobLocation);
   jobs.push({
     title: clean(node.title || ""),
     employer: clean(employer || source.label),
     location: clean(location || source.region || ""),
-    url: node.url ? new URL(String(node.url), source.url).toString() : source.url,
-    description: stripHtml(node.description || "").slice(0, 1200),
+    url: safeJobUrl(node.url || node.mainEntityOfPage?.["@id"] || source.url, source.url),
+    description: jobDescription(node.description),
     posted_at: isoDate(node.datePosted),
     valid_through: isoDate(node.validThrough),
     score: scoreJob(`${node.title || ""} ${employer || ""} ${location || ""} ${node.description || ""}`, source),
@@ -343,9 +415,14 @@ function normalizeJsonLocation(value) {
 }
 
 function uniqueJobs(jobs) {
-  return jobs.filter((job, index, all) =>
-    all.findIndex((x) => dedupeKey("parsed", x.title, x.employer, x.location) === dedupeKey("parsed", job.title, job.employer, job.location)) === index,
-  );
+  const seen = new Set();
+  return jobs.filter((job) => {
+    if (!job.url) return false;
+    const key = dedupeKey("parsed", job.title, job.employer, job.location);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 function isLikelyParsedJob(job) {
@@ -389,9 +466,17 @@ function isBlockedTitle(title) {
   ].some((pattern) => pattern.test(String(title || "")));
 }
 
-const MATCH_ALIASES = [
+const CITY_ALIASES = [
   ["riyadh", "الرياض"], ["jeddah", "جدة", "جده"], ["makkah", "mecca", "مكة"],
   ["madinah", "medina", "المدينة"], ["dammam", "الدمام"], ["khobar", "الخبر"],
+];
+
+export function cityAliases(value) {
+  return CITY_ALIASES.find((group) => group.includes(value)) || [value];
+}
+
+const MATCH_ALIASES = [
+  ...CITY_ALIASES,
   ["saudi arabia", "ksa", "السعودية", "riyadh", "jeddah", "dammam", "khobar", "makkah", "madinah", "الرياض", "جدة", "الدمام", "الخبر"],
   ["gcc", "gulf", "الخليج", "saudi arabia", "united arab emirates", "qatar", "kuwait", "bahrain", "oman"],
   ["mechanical engineer", "مهندس ميكانيكي", "مهندس ميكانيكا"],
@@ -584,11 +669,7 @@ function assertPublicSourceUrl(value) {
 async function fetchWithSafeRedirects(initialUrl, options = {}) {
   let current = assertPublicSourceUrl(initialUrl).toString();
   for (let redirects = 0; redirects <= 3; redirects += 1) {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 12_000);
-    let response;
-    try { response = await fetch(current, { ...options, redirect: "manual", signal: controller.signal }); }
-    finally { clearTimeout(timer); }
+    const response = await fetch(current, { ...options, redirect: "manual" });
     if (![301, 302, 303, 307, 308].includes(response.status)) return response;
     const location = response.headers.get("location");
     if (!location) throw new Error("source redirect missing location");
@@ -615,8 +696,8 @@ async function readLimitedText(response, limit) {
   return new TextDecoder().decode(bytes);
 }
 
-async function archiveStaleJobs(env, sourceId, now) {
-  const cutoff = new Date(Date.parse(now) - 14 * 86400_000).toISOString();
+async function archiveStaleJobs(env, sourceId, now, grace) {
+  const cutoff = new Date(Date.parse(now) - grace).toISOString();
   await getJobDb(env).prepare(
     "UPDATE jobs SET verification_status='stale', closed_at=?1, updated_at=?1 WHERE source_id=?2 AND closed_at='' AND last_verified_at<>'' AND last_verified_at<?3",
   ).bind(now, sourceId, cutoff).run();
@@ -638,7 +719,7 @@ export const METRIC_UPSERT_SQL = `INSERT INTO ingestion_metrics(metric_key, buck
      ON CONFLICT(metric_key, bucket) DO UPDATE SET value=ingestion_metrics.value+excluded.value, updated_at=CURRENT_TIMESTAMP`;
 
 async function incrementMetric(env, key, bucket = "global", amount = 1) {
-  await getJobDb(env).prepare(METRIC_UPSERT_SQL).bind(key, bucket, Number(amount || 1)).run();
+  await getJobDb(env).prepare(METRIC_UPSERT_SQL).bind(key, bucket, Number(amount)).run();
 }
 
 function classifyJob(job) {
@@ -723,6 +804,17 @@ function stripHtml(value) {
   return clean(String(value || "").replace(/<script[\s\S]*?<\/script>/gi, " ").replace(/<style[\s\S]*?<\/style>/gi, " ").replace(/<[^>]+>/g, " "));
 }
 
+function jobDescription(value) {
+  const text = String(value || "")
+    .replace(/<script\b[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style\b[\s\S]*?<\/style>/gi, " ")
+    .replace(/<br\b[^>]*>|<\/(?:p|li|h[1-6]|div|section|tr)\s*>/gi, "\n")
+    .replace(/<li\b[^>]*>/gi, "- ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;|&#160;/gi, " ");
+  return decodeHtml(text).split(/\r?\n/).map(clean).filter(Boolean).join("\n").slice(0, DESCRIPTION_LIMIT).trim();
+}
+
 function decodeHtml(value) {
   return String(value || "")
     .replace(/&quot;/g, '"')
@@ -734,7 +826,7 @@ function decodeHtml(value) {
 }
 
 function clean(value) {
-  return String(value || "").replace(/\s+/g, " ").trim();
+  return String(value || "").replace(/[\u0000-\u001f\s]+/g, " ").trim();
 }
 
 function dedupeKey(source, title, employer, location) {

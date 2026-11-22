@@ -258,3 +258,6 @@
 ## jobs68 — 2026-11-22 21:20
 
 - Ground job-specific résumés and letters in requirement evidence
+## jobs69 — 2026-11-22 21:40
+
+- Ingest official Saudi government vacancies and improve job-feed reliability

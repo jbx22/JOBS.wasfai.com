@@ -9,7 +9,7 @@ export async function onRequestGet(context) {
       ? [job.salary_min, job.salary_max].filter((v) => v !== null).map((v) => Number(v).toLocaleString("en-US")).join(" – ") + " ر.س/شهر" : "الراتب غير معلن";
     const external = sourceLink(job.source_url);
     const action = job.kind === "employer" ? `<section class="recruitment-card" data-apply-job="${e(job.id)}"><h2>التقديم على الوظيفة</h2><p data-apply-status>جارٍ التحقق من حسابك…</p></section>`
-      : external ? `<a class="btn primary" href="${e(external)}" target="_blank" rel="noopener noreferrer nofollow">التقديم لدى المصدر</a>` : "<p>رابط التقديم غير متاح حالياً.</p>";
+      : external ? `<a class="btn primary" href="${e(external)}" target="_blank" rel="noopener noreferrer nofollow">${job.government ? "فتح الإعلان الرسمي والتقديم" : "التقديم لدى المصدر"}</a>` : "<p>رابط التقديم غير متاح حالياً.</p>";
     return page(job.title, `<article class="recruitment-card"><h2>${e(job.company_name)}</h2>
       <p>${e(job.city)}${job.country_code ? " · " + e(job.country_code) : ""}</p><p>${e(salary)}</p>
       ${job.experience_min !== null ? "<p>الحد الأدنى للخبرة: " + Number(job.experience_min) + " سنة</p>" : ""}

@@ -1,7 +1,7 @@
 {
-  "current": 68,
-  "lastDescription": "Ground job-specific résumés and letters in requirement evidence",
-  "lastAt": "2026-11-22 21:20",
+  "current": 69,
+  "lastDescription": "Ingest official Saudi government vacancies and improve job-feed reliability",
+  "lastAt": "2026-11-22 21:40",
   "history": [
     {
       "n": 1,
@@ -332,6 +332,11 @@
       "n": 68,
       "description": "Ground job-specific résumés and letters in requirement evidence",
       "at": "2026-11-22 21:20"
+    },
+    {
+      "n": 69,
+      "description": "Ingest official Saudi government vacancies and improve job-feed reliability",
+      "at": "2026-11-22 21:40"
     }
   ]
 }

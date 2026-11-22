@@ -4,10 +4,20 @@ export const EMPLOYER_BOARDS = [
   { id: "foodics-workable", label: "Foodics", url: "https://apply.workable.com/api/v1/widget/accounts/foodics", portal: "https://apply.workable.com/foodics/", mode: "workable" },
 ];
 
+export const GOVERNMENT_CONNECTOR = "saudi_government";
+export const GOVERNMENT_BOARDS = [
+  { id: "saudi-zatca", label: "هيئة الزكاة والضريبة والجمارك (ZATCA)", portal: "https://careers.zatca.gov.sa/" },
+  { id: "saudi-expro", label: "هيئة كفاءة الإنفاق والمشروعات الحكومية (EXPRO)", portal: "https://careers.expro.gov.sa/" },
+  { id: "saudi-sama", label: "البنك المركزي السعودي (SAMA)", portal: "https://careers.sama.gov.sa/ar/" },
+  { id: "saudi-misa", label: "وزارة الاستثمار السعودية (MISA)", portal: "https://jobs.misa.gov.sa/" },
+].map((board) => ({ ...board, url: new URL("/sitemap.xml", board.portal).href, mode: GOVERNMENT_CONNECTOR, region: "Saudi Arabia" }));
+
+export const CENTRAL_BOARDS = [...EMPLOYER_BOARDS, ...GOVERNMENT_BOARDS];
+
 export const SOURCE_CONNECTORS = ["public_html", "public_json", "greenhouse", "lever", "ashby", "workable"];
 
 export async function ensureEmployerBoards(db) {
-  const insert = `INSERT INTO sources (id, label, url, connector_mode, interval_minutes, owner_user_id, visibility)
-    VALUES (?, ?, ?, ?, 360, '', 'central') ON CONFLICT(id) DO NOTHING`;
-  await db.batch(EMPLOYER_BOARDS.map(({ id, label, url, mode }) => db.prepare(insert).bind(id, label, url, mode)));
+  const insert = `INSERT INTO sources (id, label, url, connector_mode, region, interval_minutes, owner_user_id, visibility)
+    VALUES (?, ?, ?, ?, ?, 360, '', 'central') ON CONFLICT(id) DO NOTHING`;
+  await db.batch(CENTRAL_BOARDS.map(({ id, label, url, mode, region }) => db.prepare(insert).bind(id, label, url, mode, region || "")));
 }

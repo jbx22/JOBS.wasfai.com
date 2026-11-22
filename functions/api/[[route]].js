@@ -1,6 +1,6 @@
 import { getPublicJob, matchPublicJobs, plainDescription } from "./_public_jobs.js";
 import { matchJob, normalizeProfile } from "../../workers/ingestion/src/index.js";
-import { EMPLOYER_BOARDS, SOURCE_CONNECTORS } from "../../workers/ingestion/src/boards.js";
+import { CENTRAL_BOARDS, EMPLOYER_BOARDS, SOURCE_CONNECTORS } from "../../workers/ingestion/src/boards.js";
 import {
   json,
   noContent,
@@ -273,7 +273,7 @@ async function centralSources(context) {
       AND j.closed_at='' AND (j.valid_through='' OR j.valid_through>=?1) AND j.last_verified_at>=?2) AS job_count
     FROM sources s WHERE s.visibility='central' AND s.owner_user_id='' AND s.enabled=1 ORDER BY s.label`).bind(now, since).all();
   return json({ sources: results.map((source) => ({ ...source,
-    url: EMPLOYER_BOARDS.find(({ id }) => id === source.id)?.portal || source.url,
+    url: CENTRAL_BOARDS.find(({ id }) => id === source.id)?.portal || source.url,
     source_quality: source.last_error ? "needs_attention" : source.last_scanned_at ? "live_verified" : "not_verified",
     central: true, custom: false, scheduled: true,
   })) });
@@ -313,7 +313,7 @@ async function sourceScan(context, id) {
           location: job.location || source.region || "Remote",
           score: Number(job.score || 0),
           status: job.status || "discovered",
-          deadline: "",
+          deadline: job.valid_through || "",
           description: job.description || "",
           tailored_resume: "",
           cover_letter: "",

@@ -5,7 +5,7 @@ import { onRequest as workspace } from "../functions/api/[[route]].js";
 import { onRequestPost as writeDraft } from "../functions/api/ai-writer-chat.js";
 import { sessionCookie } from "../functions/api/auth/_auth.js";
 import ingestion, { matchJob, normalizeProfile, parseSourcePayload } from "../workers/ingestion/src/index.js";
-import { EMPLOYER_BOARDS } from "../workers/ingestion/src/boards.js";
+import { CENTRAL_BOARDS, EMPLOYER_BOARDS } from "../workers/ingestion/src/boards.js";
 import { gatewayFixture, testEnv } from "./helpers/gateway.mjs";
 
 const schema = readFileSync(new URL("../workers/ingestion/schema.sql", import.meta.url), "utf8");
@@ -39,6 +39,7 @@ test("cron seeds employer feeds, imports live rows and backs off a blocked sourc
   const fixture = gatewayFixture(t, { otherFetch(input) {
     const url = String(input);
     if (url.includes("careem")) return new Response(null, { status: 403 });
+    if (url.endsWith("/sitemap.xml")) return new Response('<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"></urlset>', { headers: { "Content-Type": "text/xml" } });
     return Response.json({ jobs: [url.includes("foodics") ? workableJob : greenhouseJob] });
   } });
   fixture.db.exec(schema);
@@ -48,17 +49,17 @@ test("cron seeds employer feeds, imports live rows and backs off a blocked sourc
   let scheduled;
   await ingestion.scheduled({}, env, { waitUntil: (task) => { scheduled = task; } });
   await scheduled;
-  assert.equal(messages.length, 3);
+  assert.equal(messages.length, CENTRAL_BOARDS.length);
   let acknowledgements = 0;
   await ingestion.queue({ messages: messages.map((body) => ({ body, ack: () => { acknowledgements++; } })) }, env);
-  assert.equal(acknowledgements, 3);
+  assert.equal(acknowledgements, CENTRAL_BOARDS.length);
   assert.equal(fixture.db.prepare("SELECT COUNT(*) AS n FROM jobs").get().n, 2);
   const blocked = fixture.db.prepare("SELECT last_error, next_scan_at FROM sources WHERE id='careem-greenhouse'").get();
   assert.equal(blocked.last_error, "source returned 403");
   assert.ok(Date.parse(blocked.next_scan_at) - Date.now() > 23 * 3600000);
   await ingestion.scheduled({}, env, { waitUntil: (task) => { scheduled = task; } });
   await scheduled;
-  assert.equal(messages.length, 3);
+  assert.equal(messages.length, CENTRAL_BOARDS.length);
 });
 
 test("signed-in candidates can import a job once and evaluate it through the workspace API", async (t) => {
