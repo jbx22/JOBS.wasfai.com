@@ -252,3 +252,6 @@
 ## jobs66 — 2026-11-22 20:33
 
 - Let Google reuse an existing sign-in session
+## jobs67 — 2026-11-22 20:58
+
+- Repair résumé coaching and upgrade to DeepSeek V4.1 Flash

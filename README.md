@@ -54,12 +54,12 @@ The Jobs workspace implements these workflows in its own UI. Recruiter messages 
 
 - The job detail **السيرة الذاتية** tab includes **AI Writer / AI كاتب** for subscriber-facing preparation.
 - `POST /api/ghostwriter` returns a bilingual application kit for one job: Arabic CV, English CV, Arabic cover letter, English cover letter, Arabic interview prep, and English interview prep.
-- DeepSeek V4 Flash is the default AI provider. The UI also offers MiniMax M3 and GLM 5.2 model choices through OpenRouter only.
+- DeepSeek V4.1 Flash (`deepseek-flash`) is the default AI model shown in the UI. The UI also offers MiniMax M3 and GLM 5.2 through OpenRouter.
 - Supported environment keys:
   - DeepSeek: `DEEPSEEK_API_KEY`, optional `DEEPSEEK_MODEL`, `DEEPSEEK_BASE_URL`.
   - OpenRouter: `OPENROUTER_API_KEY` powers MiniMax M3 and GLM 5.2. Optional overrides: `MINIMAX_MODEL`, `GLM_MODEL`, and `OPENROUTER_BASE_URL`.
   - Default OpenRouter model ids: `minimax/minimax-m3` and `z-ai/glm-5.2`.
-- `POST /api/resume-coach` improves the subscriber's uploaded master resume before search. The subscriber approves the improved master resume, then its target titles, keywords, locations, and resume text become the source of truth for job matching and job-specific generation.
+- `POST /api/resume-coach` uses DeepSeek V4.1 Flash to improve uploaded or pasted resume text in Arabic and English before search. The subscriber approves the improved master resume, then its target titles, keywords, locations, and resume text become the source of truth for job matching and job-specific generation.
 - `POST /api/ai-writer-chat` provides interactive interview prep so subscribers can ask questions about the job, generated kit, gaps, and answers.
 - `POST /api/export-package` exports approved kits as `.docx` or Arabic-shaped `.pdf`. PDF requests are authenticated and forwarded to the token-protected Cloudflare Container Typst renderer; no lightweight Helvetica fallback is used.
 - Account workspace documents are stored independently in D1 (`user_state_documents`) with per-document revisions and optimistic conflict detection. The legacy JSON blob is retained only as a rollback copy during migration.
