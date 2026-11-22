@@ -1,7 +1,7 @@
 {
-  "current": 59,
-  "lastDescription": "Repair Google OAuth and durable account restrictions; add moderated employer recruitment, private applications, verified public job pages and sitemaps; enforce admin scopes and idempotent payment activation.",
-  "lastAt": "2026-11-22",
+  "current": 60,
+  "lastDescription": "Add employer job feeds, evidence-based fit evaluation, vacancy import, screening and recruiter drafts, and follow-up calendar export.",
+  "lastAt": "2026-11-22 18:04",
   "history": [
     {
       "n": 1,
@@ -287,6 +287,11 @@
       "n": 59,
       "description": "Repair Google OAuth and durable account restrictions; add moderated employer recruitment, private applications, verified public job pages and sitemaps; enforce admin scopes and idempotent payment activation.",
       "at": "2026-11-22"
+    },
+    {
+      "n": 60,
+      "description": "Add employer job feeds, evidence-based fit evaluation, vacancy import, screening and recruiter drafts, and follow-up calendar export.",
+      "at": "2026-11-22 18:04"
     }
   ]
 }

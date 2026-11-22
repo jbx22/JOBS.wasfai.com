@@ -5,7 +5,8 @@ import { ensureRecruitmentSchema, invalid } from "./_recruitment.js";
 export const PUBLIC_JOB_UNION = `
   SELECT j.id, 'ingested' AS kind, j.title, j.employer AS company_name, j.location AS city,
     '' AS country_code, j.role_family AS profession, NULL AS experience_min, NULL AS salary_min, NULL AS salary_max,
-    '' AS employment_type, j.description, j.source_url, j.posted_at AS published_at, j.valid_through, j.updated_at
+    '' AS employment_type, j.description, j.source_url, j.posted_at AS published_at, j.valid_through, j.updated_at,
+    s.id AS source_id, j.discovered_at AS discovered_at, j.last_verified_at AS last_verified_at
   FROM jobs j JOIN sources s ON s.id=j.source_id
   WHERE s.visibility='central' AND s.owner_user_id='' AND s.enabled=1
     AND j.verification_status='live' AND j.closed_at='' AND j.last_verified_at>=?2
@@ -13,7 +14,8 @@ export const PUBLIC_JOB_UNION = `
   UNION ALL
   SELECT j.id, 'employer' AS kind, j.title, p.company_name, j.city, j.country_code,
     j.profession, j.experience_min, j.salary_min, j.salary_max, j.employment_type,
-    j.description, '' AS source_url, j.published_at, j.valid_through, j.updated_at
+    j.description, '' AS source_url, j.published_at, j.valid_through, j.updated_at,
+    'verified-employers' AS source_id, j.published_at AS discovered_at, j.updated_at AS last_verified_at
   FROM recruitment_jobs j JOIN employer_profiles p ON p.user_id=j.employer_id JOIN users u ON u.id=p.user_id
   WHERE j.status='published' AND p.status='verified' AND u.account_status='active' AND j.valid_through>=?1
 `;
@@ -60,7 +62,7 @@ export async function listPublicJobs(env, filters = {}, limit = 40, offset = 0) 
   const max = Math.max(1, Math.min(Number.isInteger(limit) ? limit : 40, 1000));
   const start = Math.max(0, Math.min(Number.isInteger(offset) ? offset : 0, 1000000));
   query.values.push(max, start);
-  const { results = [] } = await db.prepare(query.sql + " ORDER BY published_at DESC, kind, id LIMIT ?" + (query.values.length - 1) + " OFFSET ?" + query.values.length).bind(...query.values).all();
+  const { results = [] } = await db.prepare(query.sql + " ORDER BY COALESCE(NULLIF(published_at,''),discovered_at) DESC, kind, id LIMIT ?" + (query.values.length - 1) + " OFFSET ?" + query.values.length).bind(...query.values).all();
   return results.map((row) => ({ ...row, public_id: (row.kind === "employer" ? "e-" : "i-") + row.id }));
 }
 
@@ -121,11 +123,11 @@ export function jobPosting(job) {
 export async function matchPublicJobs(env, inputProfile, inputLimit) {
   const profile = normalizeProfile(inputProfile || {});
   const limit = Math.max(1, Math.min(Math.floor(Number(inputLimit) || 40), 80));
-  const records = await listPublicJobs(env, {}, 300);
+  const records = await listPublicJobs(env, {}, 1000);
   const jobs = records.map((row) => matchJob({
     ...row, id: row.kind === "employer" ? row.public_id : row.id,
     employer: row.company_name, location: row.city, posted_at: row.published_at,
-    role_family: row.profession, status: "discovered", source_id: row.kind === "employer" ? "verified-employers" : "public-ingestion",
+    role_family: row.profession, status: "discovered",
     source_url: row.kind === "employer" ? "https://jobs.wasfai.com/vacancies/" + encodeURIComponent(row.public_id) : sourceLink(row.source_url),
     data_quality: "live_verified", source_quality: "live_verified",
   }, profile)).filter((job) => job.match_eligible).sort((a, b) => b.score - a.score).slice(0, limit);

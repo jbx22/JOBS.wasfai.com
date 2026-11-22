@@ -1,4 +1,6 @@
-import { matchPublicJobs } from "./_public_jobs.js";
+import { getPublicJob, matchPublicJobs, plainDescription } from "./_public_jobs.js";
+import { matchJob, normalizeProfile } from "../../workers/ingestion/src/index.js";
+import { EMPLOYER_BOARDS, SOURCE_CONNECTORS } from "../../workers/ingestion/src/boards.js";
 import {
   json,
   noContent,
@@ -18,10 +20,13 @@ export async function onRequest(context) {
 
   try {
     if (method === "POST" && parts[0] === "jobs" && parts[1] === "match") return jobsMatch(context);
+    if (method === "POST" && parts.length === 2 && parts[0] === "jobs" && parts[1] === "evaluate") return evaluateJob(context);
+    if (method === "POST" && parts.length === 2 && parts[0] === "jobs" && parts[1] === "import") return importJob(context);
     if (method === "PATCH" && parts[0] === "jobs" && parts[1] === "bulk-status") return bulkStatus(context);
     if ((method === "PATCH" || method === "PUT") && parts[0] === "jobs" && parts[2] === "status") return jobStatus(context, parts[1]);
     if ((method === "PATCH" || method === "PUT") && parts[0] === "jobs" && parts[1]) return jobUpdate(context, parts[1]);
     if (method === "DELETE" && parts[0] === "jobs" && parts[1]) return jobDelete(context, parts[1]);
+    if (method === "GET" && parts.length === 1 && parts[0] === "sources") return centralSources(context);
     if (method === "POST" && parts[0] === "sources" && !parts[1]) return sourceCreate(context);
     if ((method === "POST" || method === "PUT" || method === "PATCH") && parts[0] === "sources" && parts[2] === "schedule") return sourceSchedule(context, parts[1]);
     if (method === "POST" && parts[0] === "sources" && parts[2] === "scan") return sourceScan(context, parts[1]);
@@ -69,6 +74,63 @@ async function jobsMatch(context) {
   } catch {
     return json({ ok: false, jobs: [], matched: 0, error: "Job matching is temporarily unavailable.", code: "MATCH_UNAVAILABLE" }, 503);
   }
+}
+
+async function evaluateJob(context) {
+  const access = await requireAuthenticatedState(context);
+  if (access.error) return access.error;
+  const body = await readBody(context);
+  const fields = ["title", "employer", "location", "description", "seniority", "sector"];
+  const job = Object.fromEntries(fields.map((field) => [field, String(body.job?.[field] || "").trim().slice(0, field === "description" ? 12000 : 200)]));
+  if (!job.title || !job.employer) return json({ code: "BAD_REQUEST", error: "Add a job title and employer before evaluating fit." }, 400);
+  const profile = normalizeProfile(body.profile || {});
+  if (!profile.roles.length) return json({ code: "PROFILE_REQUIRED", error: "Add target roles to the approved resume before evaluating fit." }, 400);
+  return json(matchJob(job, profile));
+}
+
+async function importJob(context) {
+  const body = await readBody(context);
+  return withState(context, async (state) => {
+    let url;
+    try { url = new URL(String(body.url || "")); } catch { /* invalid link */ }
+    if (!url || url.protocol !== "https:" || url.username || url.password) {
+      return json({ code: "BAD_JOB_URL", error: "Enter a public HTTPS job link." }, 400);
+    }
+    const path = url.pathname.split("/").filter(Boolean);
+    let job;
+    if (url.origin === new URL(context.request.url).origin && path[0] === "vacancies" && path.length === 2) {
+      const publicJob = await getPublicJob(context.env, path[1]);
+      if (publicJob) job = { title: publicJob.title, employer: publicJob.company_name, location: publicJob.city,
+        description: publicJob.description, source_url: `${url.origin}/vacancies/${encodeURIComponent(publicJob.public_id)}` };
+    } else if (["job-boards.greenhouse.io", "boards.greenhouse.io"].includes(url.host) && path.length === 3
+      && /^[a-z0-9_-]{1,80}$/i.test(path[0]) && path[1] === "jobs" && /^\d{1,25}$/.test(path[2])) {
+      const response = await fetch(`https://boards-api.greenhouse.io/v1/boards/${path[0]}/jobs/${path[2]}`,
+        { redirect: "error", signal: AbortSignal.timeout(10000), headers: { Accept: "application/json" } }).catch(() => null);
+      if (!response) return json({ code: "BOARD_UNAVAILABLE", error: "The employer board is temporarily unavailable." }, 502);
+      if (response.ok) {
+        const record = await response.json().catch(() => null);
+        if (record?.title) job = { title: record.title, employer: record.company_name || EMPLOYER_BOARDS.find(({ id }) => id === `${path[0].toLowerCase()}-greenhouse`)?.label || path[0], location: record.location?.name,
+          description: plainDescription(String(record.content || "").replace(/&lt;/g, "<").replace(/&gt;/g, ">")),
+          source_url: `https://job-boards.greenhouse.io/${path[0].toLowerCase()}/jobs/${path[2]}` };
+      } else if (response.status !== 404) {
+        return json({ code: "BOARD_UNAVAILABLE", error: "The employer board is temporarily unavailable." }, 502);
+      }
+    } else {
+      return json({ code: "UNSUPPORTED_JOB_LINK", error: "Use a Jobs Wasfai vacancy or a public Greenhouse job link." }, 400);
+    }
+    if (!job) return json({ code: "JOB_NOT_FOUND", error: "This posting is no longer available." }, 404);
+    const jobs = Array.isArray(state.jobs) ? state.jobs : [];
+    const existing = jobs.find((item) => item.source_url === job.source_url);
+    if (existing) {
+      existing.imported = true;
+      return json(existing);
+    }
+    const imported = { id: `manual-${crypto.randomUUID()}`, source: "manual", status: "discovered", imported: true,
+      title: String(job.title).slice(0, 300), employer: String(job.employer).slice(0, 200), location: String(job.location || "").slice(0, 200),
+      source_url: job.source_url, description: String(job.description || "").slice(0, 12000), score: 0, timeline: [] };
+    state.jobs = [imported, ...jobs];
+    return json(imported, 201);
+  });
 }
 
 async function bulkStatus(context) {
@@ -145,9 +207,9 @@ async function sourceCreate(context) {
     const label = String(body.label || "").trim();
     const url = String(body.url || "").trim();
     if (!label || !url) return json({ error: "Source label and URL are required.", code: "BAD_REQUEST" }, 400);
-    const id = `custom-${Date.now().toString(36)}`;
+    const id = `custom-${crypto.randomUUID()}`;
     if (!isSafePublicUrl(url)) return json({ error: "Source must use a public HTTPS URL without embedded credentials.", code: "BAD_SOURCE_URL" }, 400);
-    const connectorMode = ["public_html", "public_json", "greenhouse", "lever", "ashby"].includes(body.connector_mode)
+    const connectorMode = SOURCE_CONNECTORS.includes(body.connector_mode)
       ? body.connector_mode : "public_html";
     const source = upsertSourceState(state, {
       id,
@@ -179,7 +241,7 @@ async function sourceCreate(context) {
 
 async function sourceSchedule(context, id) {
   const body = await readBody(context);
-  return withState(context, async (state) => {
+  return withState(context, async (state, user) => {
     const source = (state.sources || []).find((item) => item.id === id);
     if (!source) return json({ error: "Source not found.", code: "NOT_FOUND" }, 404);
     const previous = { scheduled: source.scheduled, interval_minutes: source.interval_minutes, next_scan_at: source.next_scan_at };
@@ -190,6 +252,7 @@ async function sourceSchedule(context, id) {
       const synced = await ingestionRequest(context, `/admin/sources/${encodeURIComponent(id)}`, "PATCH", {
         scheduled: source.scheduled,
         interval_minutes: source.interval_minutes,
+        owner_user_id: user.sub,
       });
       if (!synced.ok) {
         Object.assign(source, previous);
@@ -200,17 +263,32 @@ async function sourceSchedule(context, id) {
   });
 }
 
+async function centralSources(context) {
+  const db = getJobDb(context.env);
+  if (!db) return json({ code: "STORAGE_NOT_CONFIGURED", error: "Sources are temporarily unavailable." }, 503);
+  const now = new Date().toISOString();
+  const since = new Date(Date.now() - 7 * 86400000).toISOString();
+  const { results = [] } = await db.prepare(`SELECT s.id, s.label, s.url, s.region, s.enabled, s.connector_mode, s.last_scanned_at, s.last_error,
+    s.interval_minutes, s.next_scan_at, (SELECT COUNT(*) FROM jobs j WHERE j.source_id=s.id AND j.verification_status='live'
+      AND j.closed_at='' AND (j.valid_through='' OR j.valid_through>=?1) AND j.last_verified_at>=?2) AS job_count
+    FROM sources s WHERE s.visibility='central' AND s.owner_user_id='' AND s.enabled=1 ORDER BY s.label`).bind(now, since).all();
+  return json({ sources: results.map((source) => ({ ...source,
+    url: EMPLOYER_BOARDS.find(({ id }) => id === source.id)?.portal || source.url,
+    source_quality: source.last_error ? "needs_attention" : source.last_scanned_at ? "live_verified" : "not_verified",
+    central: true, custom: false, scheduled: true,
+  })) });
+}
+
 async function sourceScan(context, id) {
-  return withState(context, async (state) => {
+  return withState(context, async (state, user) => {
     const source = (state.sources || []).find((item) => item.id === id);
-    if (!source) return json({ error: "Source not found.", code: "NOT_FOUND" }, 404);
-    if (!["public_html", "public_json", "greenhouse", "lever", "ashby"].includes(source.connector_mode)) {
+    if (!source?.custom) return json({ error: "Source not found.", code: "NOT_FOUND" }, 404);
+    if (!SOURCE_CONNECTORS.includes(source.connector_mode)) {
       return json({ error: "This source needs an approved provider API before it can be scanned.", code: "APPROVED_API_REQUIRED" }, 409);
     }
 
-    const upstream = String(context.env.JOBS_INGESTION_URL || "https://jobs-wasfai-ingestion.jabosaag.workers.dev").replace(/\/+$/, "");
     try {
-      const scan = await ingestionRequest(context, "/admin/scan-now?mode=direct", "POST", { id });
+      const scan = await ingestionRequest(context, "/admin/scan-now?mode=direct", "POST", { id, owner_user_id: user.sub });
       const scanPayload = scan.payload || {};
       if (!scan.ok || !scanPayload.ok) {
         const detail = scan.error || scanPayload.error || "ingestion worker rejected scan";
@@ -218,15 +296,13 @@ async function sourceScan(context, id) {
         return json({ error: "Live source scan failed.", code: "INGESTION_SCAN_FAILED", detail, source }, 502);
       }
 
-      const jobsResponse = await fetch(`${upstream}/jobs?limit=100`);
-      const jobsPayload = await jobsResponse.json().catch(() => ({}));
-      if (!jobsResponse.ok || !Array.isArray(jobsPayload.jobs)) {
+      if (!Array.isArray(scanPayload.jobs)) {
         source.last_error = "The scan completed but the ingestion jobs list could not be read.";
         return json({ error: "Live scan completed, but results could not be loaded.", code: "INGESTION_RESULTS_UNAVAILABLE", source }, 502);
       }
 
       const scannedAt = new Date().toISOString();
-      const jobs = jobsPayload.jobs
+      const jobs = scanPayload.jobs
         .filter((job) => job.source_id === id)
         .map((job) => ({
           id: job.id,

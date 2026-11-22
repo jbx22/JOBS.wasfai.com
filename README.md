@@ -42,11 +42,11 @@ Convention: `jobs{N}` is a sequential integer. `jobs1` = initial prototype, `job
 
 ## Source Repo Map
 
-- `job-ops`: primary product foundation for login, jobs/statuses, scoring, pipeline runs, Ghostwriter, generated PDFs, Gmail/IMAP follow-up, timelines, and analytics concepts.
-- `career-ops`: reference for broader multi-source search, application-package workflow, and pipeline language.
-- `ai-job-search`: reference for assistant-led profile, CV, cover-letter, and job-board skill workflow.
+- [JobOps](https://github.com/DaKheera47/job-ops) informs the application tracker, Ghostwriter, bilingual PDF export, recruiter reply drafts, and calendar follow-ups.
+- [Career-Ops](https://github.com/career-ops-hq/career-ops) informs job-link import, multi-source search, evidence-based fit grades, and the approval-based application package.
+- [AI Job Search](https://github.com/ai-job-search-dev/ai-job-search) informs the approved CV workflow, screening-answer drafts, tailored CVs and cover letters, and mock interviews.
 
-Milestone 1 intentionally does not mutate those repos and does not implement real scraping, real Gmail OAuth, payments, or subscriber billing.
+The Jobs workspace implements these workflows in its own UI. Recruiter messages can be pasted to prepare a reply. Gmail and IMAP inbox synchronization require a separate integration. Users review drafts and submit their applications themselves.
 
 ## AI Writer / AI كاتب
 
@@ -113,6 +113,8 @@ The PWA includes `/terms` and `/privacy` screens. Email/password storage is inte
 - Apply migrations `004_normalize_user_state.sql` and `005_backfill_user_state_documents.sql` before deploying the normalized account-state Functions. Migration 005 is restartable and never overwrites newer normalized records.
 
 The production PDF renderer is in `workers/pdf-renderer/` and uses `Dockerfile.typst`. Deploy with `npm run deploy:pdf`, set `TYPST_RENDER_TOKEN` on both the renderer Worker and Pages, and set Pages `TYPST_RENDER_URL` to the renderer Worker URL.
+
+The ingestion schedule registers the public Tamara and Careem Greenhouse boards and the Foodics Workable feed. It keeps existing source settings, refreshes records from provider jobs lists, and backs off when an upstream source returns an access error. The existing Sources screen shows the Worker-backed catalog and scan status.
 
 Core endpoints:
 
