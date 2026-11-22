@@ -449,6 +449,31 @@ function ghostwriterFor(jobId) {
   return state.ghostwriter[jobId];
 }
 
+function invalidateApplicationReview(jobId, changes = {}) {
+  const kit = ghostwriterFor(jobId);
+  if (!kit) return;
+  state.ghostwriter[jobId] = { ...kit, ...changes, quality_review: null };
+  state.approvedKits[jobId] = false;
+  document.querySelectorAll("[data-export-kit]").forEach((button) => {
+    if (button.dataset.jobId === jobId) button.disabled = true;
+  });
+  document.querySelectorAll("[data-requirement-review]").forEach((review) => {
+    if (review.dataset.requirementReview === jobId) review.remove();
+  });
+}
+
+function applicationErrorMessage(code) {
+  const english = state.locale === "en";
+  switch (code) {
+    case "JOB_DETAILS_REQUIRED": return english ? "Paste the full job posting or its requirements before generating." : "الصق إعلان الوظيفة الكامل أو متطلباتها قبل التوليد.";
+    case "SOURCE_EVIDENCE_REQUIRED": return english ? "Add your résumé before tailoring an application." : "أضف سيرتك الذاتية قبل تخصيص مستندات التقديم.";
+    case "KIT_INCOMPLETE": return english ? "Complete both language versions before review." : "أكمل المستندات باللغتين قبل المراجعة.";
+    case "QUALITY_REVIEW_REQUIRED": return english ? "Review the current documents before exporting." : "راجع المستندات الحالية قبل التصدير.";
+    case "JOB_CONTEXT_CHANGED": return english ? "The job or source résumé changed during generation. Generate again." : "تغيّرت معلومات الوظيفة أو السيرة أثناء التوليد. أعد التوليد.";
+    default: return "";
+  }
+}
+
 function aiWriterLabel(id = state.aiWriterModel) {
   return AI_WRITER_MODELS.find((model) => model.id === id)?.label || AI_WRITER_MODELS[0].label;
 }
@@ -1158,7 +1183,11 @@ function sameSourceJobs(job, limit = 3) {
 function replaceJob(updated) {
   const i = state.jobs.findIndex((x) => x.id === updated.id);
   if (i === -1) state.jobs.unshift(updated);
-  else state.jobs[i] = updated;
+  else {
+    const old = state.jobs[i];
+    if (["title", "employer", "description"].some((field) => old[field] !== updated[field])) invalidateApplicationReview(updated.id);
+    state.jobs[i] = updated;
+  }
 }
 
 function saveGuestWorkspace() {
@@ -1929,7 +1958,7 @@ function renderGhostwriterPanel(job, kit) {
   const provider = kit?.writer_label || (kit?.provider === "deepseek" ? "DeepSeek" : kit?.provider === "ai" ? "AI" : kit?.provider === "template" ? "قالب ذكي" : aiWriterLabel());
   const generatedAt = kit?.generated_at ? new Date(kit.generated_at).toLocaleString("ar-SA") : "";
   const resumeReady = originalResumeReady();
-  const approved = Boolean(state.approvedKits?.[job.id]);
+  const approved = Boolean(state.approvedKits?.[job.id] && kit?.quality_review?.approved);
   const modelOptions = AI_WRITER_MODELS.map(
     (model) => `<option value="${esc(model.id)}" ${state.aiWriterModel === model.id ? "selected" : ""}>${esc(model.label)}</option>`,
   ).join("");
@@ -1947,9 +1976,8 @@ function renderGhostwriterPanel(job, kit) {
       <select data-ai-writer-model>${modelOptions}</select>
     </div>
     <div class="field">
-      <label>Target-job tailoring brief</label>
-      <textarea data-tailoring-brief="${esc(job.id)}" placeholder="Add the key requirements, recruiter notes, or points you want emphasized. This is used only for this job.">${esc(state.tailoringBriefs?.[job.id] || "")}</textarea>
-      <small class="muted tiny">The AI keeps claims grounded in the approved master resume and the job description.</small>
+      <label>${state.locale === "en" ? "Full job posting or recruiter notes" : "إعلان الوظيفة الكامل أو ملاحظات مسؤول التوظيف"}</label>
+      <textarea data-tailoring-brief="${esc(job.id)}" placeholder="${state.locale === "en" ? "Paste the full posting if the imported description is incomplete." : "الصق إعلان الوظيفة كاملاً إذا كان الوصف المستورد مختصراً."}">${esc(state.tailoringBriefs?.[job.id] || "")}</textarea>
     </div>
     ${resumeReady ? "" : `<div class="empty compact">لنتيجة أفضل: افتح الحساب وأضف السيرة الأصلية قبل التوليد. بدونها سيستخدم الكاتب إشارات مختصرة فقط.</div>`}
     <div class="ghostwriter-actions">
@@ -1968,6 +1996,7 @@ function renderGhostwriterPanel(job, kit) {
           ${ghostList("تحضير المقابلة", kit.ar_interview_prep)}
           ${ghostList("Interview prep", kit.en_interview_prep)}
         </div>
+        ${renderRequirementReview(kit.quality_review, job.id)}
         <div class="ghostwriter-next">
           <strong>خطوات سريعة</strong>
           <ul>${(kit.next_actions || []).map((item) => `<li>${esc(item)}</li>`).join("")}</ul>
@@ -1975,14 +2004,36 @@ function renderGhostwriterPanel(job, kit) {
         <div class="approval-box ${approved ? "approved" : ""}">
           <div>
             <strong>${approved ? "الحزمة معتمدة" : "اعتمد الحزمة قبل التصدير"}</strong>
-            <p class="muted tiny">بعد المراجعة، اعتمد الملفات ثم نزّل DOCX أو PDF للتقديم.</p>
+            <p class="muted tiny">راجع أدلة المطابقة والفجوات قبل الاعتماد. تُراجع التعديلات مجدداً قبل التصدير.</p>
           </div>
-          <button class="btn ${approved ? "outline" : "primary"}" data-approve-kit="${esc(job.id)}">${iconCheck()} ${approved ? "معتمدة" : "اعتماد الحزمة"}</button>
+          <button class="btn ${approved ? "outline" : "primary"}" data-approve-kit="${esc(job.id)}" ${state.action.pending === "kit-review" ? "disabled" : ""}>${iconCheck()} ${approved ? "معتمدة" : "مراجعة واعتماد الحزمة"}</button>
         </div>
         ${renderApplicationPackageBlock(job, approved)}
         ${renderInterviewChat(job)}`
         : `<div class="empty compact">اضغط AI كاتب لتجهيز نسخة عربية وإنجليزية مخصصة لهذه الوظيفة، مع أسئلة مقابلة وإجابات تدريبية.</div>`
     }
+  </div>`;
+}
+
+function renderRequirementReview(review, jobId) {
+  if (!review) return "";
+  const en = state.locale === "en";
+  const status = en ? { exceeds: "Exceeds", meets: "Meets", partial: "Partial evidence", gap: "Gap" }
+    : { exceeds: "يتجاوز المتطلب", meets: "يفي بالمتطلب", partial: "دليل جزئي", gap: "فجوة" };
+  const rows = Array.isArray(review.requirements) ? review.requirements : [];
+  const requiredGap = rows.some((row) => row.priority === "required" && ["gap", "partial"].includes(row.status));
+  const notes = [...(Array.isArray(review.factual_risks) ? review.factual_risks : []),
+    ...(Array.isArray(review.missing_evidence) ? review.missing_evidence : [])];
+  return `<div class="ghostwriter-next" data-requirement-review="${esc(jobId)}">
+    <strong>${en ? "Evidence against job requirements" : "الأدلة مقابل متطلبات الوظيفة"}</strong>
+    <p class="muted tiny">${esc(review.reviewer_summary || (en ? "Review the evidence before applying." : "راجع الأدلة قبل التقديم."))}</p>
+    ${review.approved ? "" : `<p role="status">${en ? "Review required before export." : "المراجعة مطلوبة قبل التصدير."}</p>`}
+    ${requiredGap ? `<p role="status">${en ? "One or more required qualifications lack full evidence." : "بعض المؤهلات الإلزامية تحتاج إلى أدلة إضافية."}</p>` : ""}
+    ${rows.length ? `<ul>${rows.map((row) => `<li>
+      <strong>${esc(row.requirement)}</strong> · ${row.priority === "required" ? (en ? "Required" : "إلزامي") : (en ? "Preferred" : "مفضّل")} · ${esc(status[row.status] || "")}
+      ${row.evidence_quote ? `<p class="muted tiny">${esc(row.evidence_quote)}</p>` : ""}
+    </li>`).join("")}</ul>` : ""}
+    ${notes.length ? `<ul>${notes.map((note) => `<li>${esc(note)}</li>`).join("")}</ul>` : ""}
   </div>`;
 }
 
@@ -2002,7 +2053,7 @@ function renderApplicationPackageBlock(job, approved) {
 }
 
 function renderAssistedApplyPanel(job, pkg, draft, kit) {
-  const approved = Boolean(state.approvedKits?.[job.id]);
+  const approved = Boolean(state.approvedKits?.[job.id] && kit?.quality_review?.approved);
   const applyUrl = jobApplyUrl(job);
   const hasKit = Boolean(kit);
   const submitted = ["applied", "in_progress"].includes(job.status);
@@ -2505,6 +2556,7 @@ function resetResumeCoach() {
   state.resumeCoach = null;
   state.approvedMasterResume = false;
   state.masterResume = { ar: "", en: "", approved_at: "" };
+  Object.keys(state.ghostwriter).forEach((jobId) => invalidateApplicationReview(jobId));
 }
 
 function renderLegal(page) {
@@ -3017,6 +3069,7 @@ function setupEvents() {
 
   document.querySelectorAll("[data-ghostwriter]").forEach((item) => {
     item.addEventListener("click", async () => {
+      if (["ghostwriter", "kit-review"].includes(state.action.pending)) return;
       if (!onboardingReady()) {
         state.action = { pending: "", message: "", error: "Complete Profile and approve the master resume before generating application packages." };
         render();
@@ -3025,19 +3078,30 @@ function setupEvents() {
       const jobId = item.dataset.ghostwriter;
       const job = jobById(jobId);
       if (!job) return;
+      const profile = { ...approvedProfile(), target_job_brief: state.tailoringBriefs?.[jobId] || "" };
       const kit = await runAction(
         "ghostwriter",
         "جاري تجهيز كاتب الظل...",
         "تم تجهيز السيرة والخطاب والمقابلة",
-        () =>
-          apiJson("/api/ghostwriter", {
+        async () => {
+          const result = await apiJson("/api/ghostwriter", {
             method: "POST",
             body: JSON.stringify({
               job,
-              profile: { ...approvedProfile(), target_job_brief: state.tailoringBriefs?.[jobId] || "" },
+              profile,
               ai_model: state.aiWriterModel,
             }),
-          }),
+          });
+          const current = approvedProfile();
+          if (profile.target_job_brief !== (state.tailoringBriefs?.[jobId] || "") || job.description !== jobById(jobId)?.description
+              || current.approved_master_resume !== profile.approved_master_resume || current.resume_text !== profile.resume_text) {
+            const error = new Error("Application context changed");
+            error.code = "JOB_CONTEXT_CHANGED";
+            throw error;
+          }
+          return result;
+        },
+        applicationErrorMessage,
       );
       if (kit) {
         state.ghostwriter[jobId] = kit;
@@ -3072,7 +3136,9 @@ function setupEvents() {
 
   document.querySelectorAll("[data-tailoring-brief]").forEach((item) => {
     item.addEventListener("input", (e) => {
-      state.tailoringBriefs = { ...(state.tailoringBriefs || {}), [e.target.dataset.tailoringBrief]: e.target.value };
+      const jobId = e.target.dataset.tailoringBrief;
+      state.tailoringBriefs = { ...(state.tailoringBriefs || {}), [jobId]: e.target.value };
+      invalidateApplicationReview(jobId);
       saveLocalAiWriterState();
     });
   });
@@ -3083,15 +3149,34 @@ function setupEvents() {
       const field = e.target.dataset.kitDocument;
       const kit = ghostwriterFor(jobId);
       if (!kit || !field) return;
-      state.ghostwriter = { ...state.ghostwriter, [jobId]: { ...kit, [field]: e.target.value, edited_at: new Date().toISOString() } };
-      state.approvedKits = { ...(state.approvedKits || {}), [jobId]: false };
+      invalidateApplicationReview(jobId, { [field]: e.target.value, edited_at: new Date().toISOString() });
       saveLocalAiWriterState();
     });
   });
 
   document.querySelectorAll("[data-approve-kit]").forEach((item) => {
-    item.addEventListener("click", () => {
+    item.addEventListener("click", async () => {
       const jobId = item.dataset.approveKit;
+      const job = jobById(jobId);
+      const kit = ghostwriterFor(jobId);
+      if (!kit || !job || state.action.pending === "kit-review") return;
+      if (!kit.quality_review?.approved) {
+        const profile = { ...approvedProfile(), target_job_brief: state.tailoringBriefs?.[jobId] || "" };
+        const result = await runAction("kit-review", "جاري مراجعة السيرة والخطاب مقابل متطلبات الوظيفة...", "",
+          () => apiJson("/api/ghostwriter", { method: "POST", body: JSON.stringify({ job, profile, ai_model: state.aiWriterModel, review_kit: kit }) }),
+          applicationErrorMessage);
+        if (!result || ghostwriterFor(jobId) !== kit) {
+          render();
+          return;
+        }
+        state.ghostwriter[jobId] = { ...kit, quality_review: result.quality_review };
+        if (!result.quality_review?.approved) {
+          state.action = { pending: "", message: "", error: "راجع نتائج المطابقة وعدّل المستندات قبل التصدير." };
+          saveLocalAiWriterState();
+          render();
+          return;
+        }
+      }
       state.approvedKits = { ...(state.approvedKits || {}), [jobId]: true };
       state.action = { pending: "", message: "تم اعتماد الحزمة ويمكن تنزيل DOCX/PDF", error: "" };
       saveLocalAiWriterState();
@@ -3105,17 +3190,25 @@ function setupEvents() {
       const jobId = item.dataset.jobId;
       const job = jobById(jobId);
       const kit = ghostwriterFor(jobId);
-      if (!kit || !state.approvedKits?.[jobId]) return;
+      if (!kit?.quality_review?.approved || !state.approvedKits?.[jobId]) return;
       const response = await runAction(
         `export-${format}`,
         `جاري تجهيز ملف ${format.toUpperCase()}...`,
         `تم تجهيز ملف ${format.toUpperCase()}`,
-        () =>
-          fetch("/api/export-package", {
+        async () => {
+          const file = await fetch("/api/export-package", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ format, job, profile: state.profile, kit }),
-          }),
+            body: JSON.stringify({ format, job, profile: approvedProfile(), kit }),
+          });
+          if (!file.ok) {
+            const error = new Error("Application export failed");
+            error.code = (await file.json().catch(() => null))?.code;
+            throw error;
+          }
+          return file;
+        },
+        applicationErrorMessage,
       );
       if (!response || !response.ok) return;
       const blob = await response.blob();
@@ -3313,6 +3406,7 @@ function setupEvents() {
         en: coach.en_master_resume || "",
         approved_at: new Date().toISOString(),
       };
+      Object.keys(state.ghostwriter).forEach((jobId) => invalidateApplicationReview(jobId));
       state.approvedMasterResume = true;
       state.action = { pending: "", message: "Approved master resume is now used for matching and AI Writer.", error: "" };
       saveLocalProfile(state.profile);

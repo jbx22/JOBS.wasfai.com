@@ -1,7 +1,7 @@
 {
-  "current": 67,
-  "lastDescription": "Repair résumé coaching and upgrade to DeepSeek V4.1 Flash",
-  "lastAt": "2026-11-22 20:58",
+  "current": 68,
+  "lastDescription": "Ground job-specific résumés and letters in requirement evidence",
+  "lastAt": "2026-11-22 21:20",
   "history": [
     {
       "n": 1,
@@ -327,6 +327,11 @@
       "n": 67,
       "description": "Repair résumé coaching and upgrade to DeepSeek V4.1 Flash",
       "at": "2026-11-22 20:58"
+    },
+    {
+      "n": 68,
+      "description": "Ground job-specific résumés and letters in requirement evidence",
+      "at": "2026-11-22 21:20"
     }
   ]
 }

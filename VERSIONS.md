@@ -4,6 +4,7 @@ Sequential snapshots of the project. Each version is a frozen copy of the source
 
 | Version | Date | Description |
 | --- | --- | --- |
+| jobs68 | 2026-11-22 21:20 | Ground job-specific résumés and letters in requirement evidence |
 | jobs67 | 2026-11-22 20:58 | Repair résumé coaching and upgrade to DeepSeek V4.1 Flash |
 | jobs66 | 2026-11-22 20:33 | Let Google reuse an existing sign-in session |
 | jobs65 | 2026-11-22 20:07 | Use bounded form-encoded requests for Google sign-in |
