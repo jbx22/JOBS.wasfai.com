@@ -72,8 +72,11 @@ test("callback persists a verified Arabic identity before issuing a session", as
   assert.equal(account.display_name, "جابر حسن");
   assert.ok(account.accepted_terms_at);
   const tokenCall = calls.find((c) => c.url.endsWith("/token"));
-  assert.equal(tokenCall.init.body.get("code_verifier"), verifier);
-  assert.equal(tokenCall.init.body.get("redirect_uri"), "https://jobs.wasfai.com/api/auth/google/callback");
+  assert.equal(typeof tokenCall.init.body, "string");
+  assert.equal(tokenCall.init.redirect, "manual");
+  const tokenParams = new URLSearchParams(tokenCall.init.body);
+  assert.equal(tokenParams.get("code_verifier"), verifier);
+  assert.equal(tokenParams.get("redirect_uri"), "https://jobs.wasfai.com/api/auth/google/callback");
   assert.equal(response.headers.get("Cache-Control"), "no-store, private");
 });
 
