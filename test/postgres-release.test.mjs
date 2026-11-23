@@ -12,6 +12,7 @@ import { onRequestPost as selectPlan } from "../functions/api/subscriptions/inde
 import { listPublicJobs } from "../functions/api/_public_jobs.js";
 import { activatePaidSubscription, ensureSubscriptionSchema, planById } from "../functions/api/_subscriptions.js";
 import { getJobDb } from "../functions/api/_db.js";
+import { readUserState, writeUserState } from "../functions/api/_state.js";
 import { testEnv } from "./helpers/gateway.mjs";
 
 test("PostgreSQL: OAuth, employer moderation, public filters and invoice replay execute through translated SQL", {
@@ -140,6 +141,18 @@ test("PostgreSQL: OAuth, employer moderation, public filters and invoice replay 
       status: payment.status, amount_halalas: Number(payment.amount_halalas), reference: "PG statement 01",
     });
     assert.equal(review.status, 200, await review.clone().text());
+    const initialState = await readUserState(db, owner);
+    const stored = await writeUserState(db, owner, { ...initialState, jobs: [{ id: "pg-workspace-job", status: "applied" }] },
+      { expectedRevisions: initialState.__revisions });
+    assert.equal(stored.__revisions.jobs, 1);
+    assert.equal((await db.prepare("SELECT status FROM applications WHERE user_id=? AND job_id=?")
+      .bind(owner.sub, "pg-workspace-job").first()).status, "applied");
+    const budgetEdit = await operate("subscribers/" + employer.sub, "PATCH", { ai_monthly_limit_usd: 22 });
+    assert.equal(budgetEdit.status, 200, await budgetEdit.clone().text());
+    const edited = await budgetEdit.json();
+    assert.equal(edited.plan, "gold_monthly");
+    assert.equal(edited.status, "active");
+    assert.ok(edited.current_period_end);
     const { rows: audits } = await client.query("SELECT action FROM audit_logs WHERE resource_type IN ('support_case','campaign','subscription_payment') ORDER BY id");
     assert.deepEqual(audits.map(row => row.action), ["support.create", "support.update", "marketing.create", "accounting.review"]);
   } finally {

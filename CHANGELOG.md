@@ -272,3 +272,7 @@
 
 - Add department admin workspaces, scoped assignments, and source-backed operator dashboards
 
+## jobs73 — 2026-11-23 14:25
+
+- Make workspace and payment updates transactional and improve PostgreSQL gateway reliability
+

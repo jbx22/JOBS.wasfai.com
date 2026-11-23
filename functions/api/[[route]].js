@@ -19,20 +19,20 @@ export async function onRequest(context) {
   const parts = url.pathname.replace(/^\/api\/?/, "").split("/").filter(Boolean);
 
   try {
-    if (method === "POST" && parts[0] === "jobs" && parts[1] === "match") return jobsMatch(context);
-    if (method === "POST" && parts.length === 2 && parts[0] === "jobs" && parts[1] === "evaluate") return evaluateJob(context);
-    if (method === "POST" && parts.length === 2 && parts[0] === "jobs" && parts[1] === "import") return importJob(context);
-    if (method === "PATCH" && parts[0] === "jobs" && parts[1] === "bulk-status") return bulkStatus(context);
-    if ((method === "PATCH" || method === "PUT") && parts[0] === "jobs" && parts[2] === "status") return jobStatus(context, parts[1]);
-    if ((method === "PATCH" || method === "PUT") && parts[0] === "jobs" && parts[1]) return jobUpdate(context, parts[1]);
-    if (method === "DELETE" && parts[0] === "jobs" && parts[1]) return jobDelete(context, parts[1]);
-    if (method === "GET" && parts.length === 1 && parts[0] === "sources") return centralSources(context);
-    if (method === "POST" && parts[0] === "sources" && !parts[1]) return sourceCreate(context);
-    if ((method === "POST" || method === "PUT" || method === "PATCH") && parts[0] === "sources" && parts[2] === "schedule") return sourceSchedule(context, parts[1]);
-    if (method === "POST" && parts[0] === "sources" && parts[2] === "scan") return sourceScan(context, parts[1]);
-    if (method === "POST" && parts[0] === "drafts") return draftCreate(context);
-    if (method === "POST" && parts[0] === "packages" && parts[2] === "generate") return packageGenerate(context, parts[1]);
-    if ((method === "POST" || method === "PUT" || method === "PATCH") && parts[0] === "profile") return profileSave(context);
+    if (method === "POST" && parts[0] === "jobs" && parts[1] === "match") return await jobsMatch(context);
+    if (method === "POST" && parts.length === 2 && parts[0] === "jobs" && parts[1] === "evaluate") return await evaluateJob(context);
+    if (method === "POST" && parts.length === 2 && parts[0] === "jobs" && parts[1] === "import") return await importJob(context);
+    if (method === "PATCH" && parts[0] === "jobs" && parts[1] === "bulk-status") return await bulkStatus(context);
+    if ((method === "PATCH" || method === "PUT") && parts[0] === "jobs" && parts[2] === "status") return await jobStatus(context, parts[1]);
+    if ((method === "PATCH" || method === "PUT") && parts[0] === "jobs" && parts[1]) return await jobUpdate(context, parts[1]);
+    if (method === "DELETE" && parts[0] === "jobs" && parts[1]) return await jobDelete(context, parts[1]);
+    if (method === "GET" && parts.length === 1 && parts[0] === "sources") return await centralSources(context);
+    if (method === "POST" && parts[0] === "sources" && !parts[1]) return await sourceCreate(context);
+    if ((method === "POST" || method === "PUT" || method === "PATCH") && parts[0] === "sources" && parts[2] === "schedule") return await sourceSchedule(context, parts[1]);
+    if (method === "POST" && parts[0] === "sources" && parts[2] === "scan") return await sourceScan(context, parts[1]);
+    if (method === "POST" && parts[0] === "drafts") return await draftCreate(context);
+    if (method === "POST" && parts[0] === "packages" && parts[2] === "generate") return await packageGenerate(context, parts[1]);
+    if ((method === "POST" || method === "PUT" || method === "PATCH") && parts[0] === "profile") return await profileSave(context);
 
     return json({
       error: "This feature is not available on this route yet.",
@@ -41,6 +41,7 @@ export async function onRequest(context) {
       method,
     }, method === "GET" ? 404 : 405);
   } catch (error) {
+    if (error?.code === "STATE_CONFLICT") return json({ error: error.message, code: error.code }, 409);
     console.error("API route failed", { path: new URL(context.request.url).pathname, name: error?.name, code: error?.code });
     return json({
       error: "API operation failed.",
@@ -52,8 +53,12 @@ export async function onRequest(context) {
 async function withState(context, mutate) {
   const result = await requireAuthenticatedState(context);
   if (result.error) return result.error;
+  const expectedRevisions = result.state.__revisions;
+  const original = JSON.stringify(result.state);
   const output = await mutate(result.state, result.user);
-  await writeUserState(getJobDb(context.env), result.user, result.state);
+  if (JSON.stringify(result.state) !== original) {
+    await writeUserState(getJobDb(context.env), result.user, result.state, { expectedRevisions });
+  }
   return output;
 }
 

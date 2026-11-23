@@ -1,6 +1,6 @@
 import { fetchMoyasarInvoice, isMoyasarCheckoutReady, moyasarInvoiceRecord, verifyWebhookSecret } from "../../_moyasar.js";
 import { activatePaidSubscription, ensureSubscriptionSchema, planAmountHalalas, planById } from "../../_subscriptions.js";
-import { getJobDb } from "../../_db.js";
+import { getJobDb, guardedUserBatch } from "../../_db.js";
 
 export async function processMoyasarPayload(context, payload, options = {}) {
   if (options.requireWebhookSecret && !verifyWebhookSecret(context.env || {}, payload)) {
@@ -42,9 +42,10 @@ export async function reconcileMoyasarPayment(env, db, row) {
       return { ok: true, status: invoice.status, invoice, verified: true };
     }
   } else {
-    await db.prepare(`UPDATE subscription_payments SET status=?, raw_payload=?, updated_at=CURRENT_TIMESTAMP
-      WHERE id=? AND (status<>'paid' OR ? IN ('refunded','voided'))`)
-      .bind(invoice.status, JSON.stringify(moyasarInvoiceRecord(invoice)), row.id, invoice.status).run();
+    await guardedUserBatch(db, row.user_id, "1 = 1", [], [db.prepare(`UPDATE subscription_payments SET status=?, raw_payload=?, updated_at=CURRENT_TIMESTAMP
+      WHERE id=? AND (status NOT IN ('paid','paid_manual','refunded','voided')
+        OR (status IN ('paid','paid_manual') AND ? IN ('refunded','voided')))`)
+      .bind(invoice.status, JSON.stringify(moyasarInvoiceRecord(invoice)), row.id, invoice.status)]);
   }
   return { ok: true, status: invoice.status, invoice, verified: true };
 }

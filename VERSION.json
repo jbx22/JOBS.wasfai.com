@@ -1,7 +1,7 @@
 {
-  "current": 72,
-  "lastDescription": "Add department admin workspaces, scoped assignments, and source-backed operator dashboards",
-  "lastAt": "2026-11-23 10:53",
+  "current": 73,
+  "lastDescription": "Make workspace and payment updates transactional and improve PostgreSQL gateway reliability",
+  "lastAt": "2026-11-23 14:25",
   "history": [
     {
       "n": 1,
@@ -352,6 +352,11 @@
       "n": 72,
       "description": "Add department admin workspaces, scoped assignments, and source-backed operator dashboards",
       "at": "2026-11-23 10:53"
+    },
+    {
+      "n": 73,
+      "description": "Make workspace and payment updates transactional and improve PostgreSQL gateway reliability",
+      "at": "2026-11-23 14:25"
     }
   ]
 }

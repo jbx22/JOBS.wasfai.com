@@ -1,5 +1,6 @@
 import { adminJson, audit, auditStatement, ensureAdminSchema, requireAdmin, SERVICE_ADMIN_EMAIL, SUPER_ADMIN_EMAIL } from "../_admin.js";
 import { adminWorkspace } from "../_admin_workspaces.js";
+import { guardedUserBatch, isWriteConflict } from "../_db.js";
 import { DEEPSEEK_LABEL, deepseekModel } from "../_deepseek.js";
 import { moyasarInvoiceRecord, moyasarStatus } from "../_moyasar.js";
 import { ensureWorkspaceSchema, noContent } from "../_state.js";
@@ -190,19 +191,35 @@ async function activatePayment(context, id) {
   const access = await requireAdmin(context, { superAdmin: true });
   if (access.error) return access.error;
   await ensureSubscriptionSchema(access.db);
-  const row = await access.db.prepare("SELECT * FROM subscription_payments WHERE id = ?").bind(id).first();
+  const row = await access.db.prepare("SELECT id, user_id, plan, status, provider_invoice_id FROM subscription_payments WHERE id = ?").bind(id).first();
   if (!row) return adminJson({ error: "Payment was not found.", code: "NOT_FOUND" }, 404);
+  if (row.status === "paid_manual") return adminJson({ ok: true, already_activated: true });
+  if (["paid", "captured", "refunded", "voided"].includes(row.status)) {
+    return adminJson({ error: "The recorded payment status cannot be manually activated.", code: "PAYMENT_ALREADY_SETTLED" }, 409);
+  }
   const plan = planById(row.plan);
-  if (!plan) return adminJson({ error: "Payment plan is no longer available.", code: "BAD_PLAN" }, 409);
-  await access.db.prepare(`
-    INSERT INTO subscriptions(user_id, plan, status, ai_monthly_limit_usd, current_period_end, updated_at)
-    VALUES (?, ?, 'active', ?, ?, CURRENT_TIMESTAMP)
-    ON CONFLICT(user_id) DO UPDATE SET plan=excluded.plan, status='active',
-      ai_monthly_limit_usd=excluded.ai_monthly_limit_usd, current_period_end=excluded.current_period_end,
-      updated_at=CURRENT_TIMESTAMP
-  `).bind(row.user_id, plan.id, plan.ai_monthly_limit_usd, new Date(Date.now() + (plan.billing === "yearly" ? 365 : 30) * 86400000).toISOString().slice(0, 10)).run();
-  await access.db.prepare("UPDATE subscription_payments SET status = 'paid_manual', updated_at = CURRENT_TIMESTAMP WHERE id = ?").bind(id).run();
-  await audit(context, access, "payment.manual_activate", "payment", id, { invoice_id: row.provider_invoice_id, plan: row.plan });
+  if (!plan?.price_sar) return adminJson({ error: "Payment plan is no longer available.", code: "BAD_PLAN" }, 409);
+  const end = new Date(Date.now() + (plan.billing === "yearly" ? 365 : 30) * 86400000).toISOString().slice(0, 10);
+  try {
+    await guardedUserBatch(access.db, row.user_id,
+      "EXISTS (SELECT 1 FROM subscription_payments WHERE id = ? AND status = ?)", [row.id, row.status], [
+      access.db.prepare(`
+        INSERT INTO subscriptions(user_id, plan, status, ai_monthly_limit_usd, current_period_end, updated_at)
+        VALUES (?, ?, 'active', ?, ?, CURRENT_TIMESTAMP)
+        ON CONFLICT(user_id) DO UPDATE SET plan=excluded.plan, status='active',
+          ai_monthly_limit_usd=excluded.ai_monthly_limit_usd,
+          current_period_end=CASE WHEN subscriptions.plan=excluded.plan AND subscriptions.status='active'
+            AND subscriptions.current_period_end > excluded.current_period_end
+            THEN subscriptions.current_period_end ELSE excluded.current_period_end END,
+          updated_at=CURRENT_TIMESTAMP
+      `).bind(row.user_id, plan.id, plan.ai_monthly_limit_usd, end),
+      access.db.prepare("UPDATE subscription_payments SET status = 'paid_manual', updated_at = CURRENT_TIMESTAMP WHERE id = ?").bind(row.id),
+      auditStatement(context, access, "payment.manual_activate", "payment", id, { invoice_id: row.provider_invoice_id, plan: row.plan }),
+    ]);
+  } catch (error) {
+    if (isWriteConflict(error)) return adminJson({ error: "Payment status changed. Refresh before trying again.", code: "PAYMENT_CHANGED" }, 409);
+    throw error;
+  }
   return adminJson({ ok: true });
 }
 
@@ -210,18 +227,38 @@ async function updateSubscriber(context, id) {
   const access = await requireAdmin(context);
   if (access.error) return access.error;
   const body = await readBody(context);
-  const plan = cleanChoice(body.plan, ["free", "gold_monthly", "gold_annual", "pro", "business", "vip"], "free");
-  const status = cleanChoice(body.status, ["trial", "active", "pending_payment", "past_due", "paused", "cancelled"], "trial");
-  const limit = Math.max(0, Math.min(1000, Number(body.ai_monthly_limit_usd ?? 5)));
-  await access.db.prepare(`
-    INSERT INTO subscriptions(user_id, plan, status, ai_monthly_limit_usd, current_period_end, updated_at)
-    VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-    ON CONFLICT(user_id) DO UPDATE SET plan=excluded.plan, status=excluded.status,
-      ai_monthly_limit_usd=excluded.ai_monthly_limit_usd, current_period_end=excluded.current_period_end,
-      updated_at=CURRENT_TIMESTAMP
-  `).bind(id, plan, status, limit, cleanDate(body.current_period_end)).run();
-  await audit(context, access, "subscriber.update", "subscription", id, { plan, status, ai_monthly_limit_usd: limit });
-  return adminJson({ ok: true, id, plan, status, ai_monthly_limit_usd: limit });
+  const target = decodeURIComponent(id);
+  const plans = ["free", "gold_monthly", "gold_annual", "pro", "business", "vip"];
+  const statuses = ["trial", "active", "pending_payment", "past_due", "paused", "cancelled"];
+  const hasEnd = Object.hasOwn(body, "current_period_end");
+  const end = typeof body.current_period_end === "string" ? cleanDate(body.current_period_end) : null;
+  const limit = body.ai_monthly_limit_usd;
+  if ((body.plan !== undefined && !plans.includes(body.plan)) ||
+    (body.status !== undefined && !statuses.includes(body.status)) ||
+    (limit !== undefined && (typeof limit !== "number" || !Number.isFinite(limit) || limit < 0 || limit > 1000)) ||
+    (hasEnd && body.current_period_end !== null && !end) ||
+    (body.plan === undefined && body.status === undefined && limit === undefined && !hasEnd)) {
+    return adminJson({ error: "Provide valid subscription changes.", code: "INVALID_SUBSCRIPTION_UPDATE" }, 400);
+  }
+  await ensureUserTable(access.db);
+  const user = await access.db.prepare("SELECT id FROM users WHERE id = ?").bind(target).first();
+  if (!user) return adminJson({ error: "User was not found.", code: "USER_NOT_FOUND" }, 404);
+  await ensureSubscriptionSchema(access.db);
+  const fields = { plan: body.plan, status: body.status, ai_monthly_limit_usd: limit, current_period_end: hasEnd ? end : undefined };
+  await guardedUserBatch(access.db, target, "1 = 1", [], [
+    access.db.prepare(`
+      INSERT INTO subscriptions(user_id, plan, status, ai_monthly_limit_usd, current_period_end, updated_at)
+      VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+      ON CONFLICT(user_id) DO UPDATE SET plan=COALESCE(?, subscriptions.plan),
+        status=COALESCE(?, subscriptions.status), ai_monthly_limit_usd=COALESCE(?, subscriptions.ai_monthly_limit_usd),
+        current_period_end=CASE WHEN ? = 1 THEN excluded.current_period_end ELSE subscriptions.current_period_end END,
+        updated_at=CURRENT_TIMESTAMP
+    `).bind(target, body.plan ?? "free", body.status ?? "trial", limit ?? 5, end,
+      body.plan ?? null, body.status ?? null, limit ?? null, Number(hasEnd)),
+    auditStatement(context, access, "subscriber.update", "subscription", target, fields),
+  ]);
+  const subscription = await access.db.prepare("SELECT plan, status, ai_monthly_limit_usd, current_period_end FROM subscriptions WHERE user_id = ?").bind(target).first();
+  return adminJson({ ok: true, id: target, ...subscription });
 }
 
 async function aiManagement(context) {
@@ -454,7 +491,9 @@ function cleanChoice(value, allowed, fallback) {
 
 function cleanDate(value) {
   const text = String(value || "").trim();
-  return /^\d{4}-\d{2}-\d{2}$/.test(text) ? text : null;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) return null;
+  const date = new Date(text + "T00:00:00Z");
+  return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === text ? text : null;
 }
 
 const STANDARD_SCOPES = ["reports", "users", "employers", "jobs", "support", "subscribers", "billing", "accounting", "ai", "ai_controls", "marketing", "sources"];

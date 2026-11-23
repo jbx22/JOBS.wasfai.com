@@ -22,10 +22,16 @@ const PORT = Number(process.env.PORT || 8080);
 const TOKEN = process.env.GATEWAY_TOKEN || "";
 const DATABASE_URL = process.env.DATABASE_URL || "";
 const MAX_SQL_BYTES = 32 * 1024;
+const MAX_REQUEST_BYTES = 16 * 1024 * 1024;
+const MAX_BATCH_STATEMENTS = 2_500;
 const STATEMENT_TIMEOUT_MS = Number(process.env.STATEMENT_TIMEOUT_MS || 15000);
 
 if (!TOKEN) {
   console.error("[gateway] refusing to start: GATEWAY_TOKEN is not set");
+  process.exit(1);
+}
+if (!Number.isInteger(STATEMENT_TIMEOUT_MS) || STATEMENT_TIMEOUT_MS <= 0 || STATEMENT_TIMEOUT_MS > 2_147_483_647) {
+  console.error("[gateway] refusing to start: STATEMENT_TIMEOUT_MS must be a positive PostgreSQL timeout");
   process.exit(1);
 }
 if (!DATABASE_URL) {
@@ -46,6 +52,7 @@ const pool = new pg.Pool({
   idleTimeoutMillis: 30_000,
   connectionTimeoutMillis: 10_000,
   application_name: "jobs-db-gateway",
+  statement_timeout: STATEMENT_TIMEOUT_MS,
 });
 
 function json(res, status, payload) {
@@ -59,21 +66,35 @@ function json(res, status, payload) {
 }
 
 function readBody(req) {
+  const tooLarge = () => Object.assign(new Error("Database request exceeds its size limit."), { statusCode: 413 });
+  if (Number(req.headers["content-length"]) > MAX_REQUEST_BYTES) {
+    req.resume();
+    return Promise.reject(tooLarge());
+  }
   return new Promise((resolve, reject) => {
     const chunks = [];
     let size = 0;
     req.on("data", (chunk) => {
+      if (size > MAX_REQUEST_BYTES) return;
       size += chunk.length;
-      if (size > MAX_SQL_BYTES) {
-        reject(Object.assign(new Error("payload too large"), { statusCode: 413 }));
-        req.destroy();
+      if (size > MAX_REQUEST_BYTES) {
+        chunks.length = 0;
+        reject(tooLarge());
         return;
       }
       chunks.push(chunk);
     });
-    req.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
+    req.on("end", () => {
+      if (size <= MAX_REQUEST_BYTES) resolve(Buffer.concat(chunks, size).toString("utf8"));
+    });
     req.on("error", reject);
   });
+}
+
+async function readJson(req) {
+  const body = await readBody(req);
+  try { return JSON.parse(body); }
+  catch { throw Object.assign(new Error("Invalid JSON request."), { statusCode: 400 }); }
 }
 
 function authorized(req) {
@@ -89,6 +110,9 @@ async function execute(client, statement) {
   const raw = statement?.sql;
   if (typeof raw !== "string" || !raw.trim()) {
     throw Object.assign(new Error("statement.sql must be a non-empty string"), { statusCode: 400 });
+  }
+  if (Buffer.byteLength(raw) > MAX_SQL_BYTES) {
+    throw Object.assign(new Error("SQL statement exceeds its size limit."), { statusCode: 413 });
   }
   if (!isSingleStatement(raw)) {
     throw Object.assign(new Error("multi-statement payloads are not allowed"), { statusCode: 400 });
@@ -126,12 +150,16 @@ async function execute(client, statement) {
   return { results: result.rows || [], success: true, meta };
 }
 
-function sqlErrorStatus(error) {
-  // Client-class SQL faults (syntax, constraint, undefined column) are 400;
-  // anything else is a server-side fault.
-  const code = String(error?.code || "");
-  if (/^22|^23|^42|^08|^53/.test(code)) return 400;
-  return error?.statusCode || 500;
+function respondFailure(res, error) {
+  if (error?.code === "23514" && error.constraint === "jobs_user_write_consistency") {
+    return json(res, 409, { ok: false, code: "DB_WRITE_CONFLICT", error: "A concurrent write changed the record." });
+  }
+  if (error?.statusCode >= 400 && error.statusCode < 500) {
+    return json(res, error.statusCode, { ok: false, code: error.code || "INVALID_REQUEST", error: error.message });
+  }
+  const unavailable = /^(08|53)|^57014$/.test(String(error?.code || ""));
+  console.error("[gateway] query failed", { code: error?.code || "UNKNOWN" });
+  return json(res, unavailable ? 503 : 500, { ok: false, code: "DATABASE_ERROR", error: "Database operation failed." });
 }
 
 const server = http.createServer(async (req, res) => {
@@ -151,13 +179,12 @@ const server = http.createServer(async (req, res) => {
   if (url.pathname === "/v1/query" && req.method === "POST") {
     let client;
     try {
-      const body = JSON.parse((await readBody(req)) || "{}");
+      const body = await readJson(req);
       client = await pool.connect();
-      await client.query(`SET LOCAL statement_timeout = ${STATEMENT_TIMEOUT_MS}`);
       const payload = await execute(client, body);
       return json(res, 200, { ok: true, ...payload });
     } catch (error) {
-      return json(res, sqlErrorStatus(error), { ok: false, error: String(error?.message || error) });
+      return respondFailure(res, error);
     } finally {
       client?.release();
     }
@@ -166,18 +193,20 @@ const server = http.createServer(async (req, res) => {
   if (url.pathname === "/v1/batch" && req.method === "POST") {
     let client;
     try {
-      const body = JSON.parse((await readBody(req)) || "{}");
-      const statements = Array.isArray(body.statements) ? body.statements : [];
+      const body = await readJson(req);
+      const statements = body?.statements;
+      if (!Array.isArray(statements) || !statements.length || statements.length > MAX_BATCH_STATEMENTS) {
+        throw Object.assign(new Error("Invalid database batch size."), { statusCode: 400 });
+      }
       client = await pool.connect();
       await client.query("BEGIN");
-      await client.query(`SET LOCAL statement_timeout = ${STATEMENT_TIMEOUT_MS}`);
       const results = [];
       for (const statement of statements) results.push(await execute(client, statement));
       await client.query("COMMIT");
       return json(res, 200, { ok: true, results });
     } catch (error) {
       try { await client?.query("ROLLBACK"); } catch { /* already aborted */ }
-      return json(res, sqlErrorStatus(error), { ok: false, error: String(error?.message || error) });
+      return respondFailure(res, error);
     } finally {
       client?.release();
     }
@@ -187,7 +216,7 @@ const server = http.createServer(async (req, res) => {
 });
 
 server.listen(PORT, "0.0.0.0", () => {
-  console.log(`[gateway] listening on :${PORT}`);
+  console.log(`[gateway] listening on :${server.address().port}`);
 });
 
 for (const signal of ["SIGTERM", "SIGINT"]) {
