@@ -37,3 +37,60 @@ jobs:
       - run: node --test vps/db-gateway/test/sql.test.mjs
       - name: Compile Pages Functions
         run: npx wrangler pages functions build functions --outdir .ci-build --compatibility-date 2026-07-11 --compatibility-flags nodejs_compat
+
+  deploy:
+    name: Deploy Cloudflare Pages
+    needs: checks
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && github.repository == 'jbx22/JOBS.wasfai.com'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: bash
+    environment:
+      name: production
+      url: https://jobs.wasfai.com
+    concurrency:
+      group: jobs-wasfai-production
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: "24"
+          cache: npm
+      - run: npm ci
+      - name: Check current main commit
+        id: current
+        run: |
+          main_sha=$(git ls-remote --exit-code origin refs/heads/main | cut -f1)
+          if [[ "$main_sha" == "$GITHUB_SHA" ]]; then
+            echo "deploy=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::Skipping this commit because main has advanced to $main_sha."
+          fi
+      - name: Publish the tested commit
+        if: steps.current.outputs.deploy == 'true'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID || vars.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          : "${CLOUDFLARE_API_TOKEN:?Configure CLOUDFLARE_API_TOKEN for production}"
+          : "${CLOUDFLARE_ACCOUNT_ID:?Configure CLOUDFLARE_ACCOUNT_ID for production}"
+          ./node_modules/.bin/wrangler pages deploy public --project-name jobs-wasfai --branch main --commit-hash "$GITHUB_SHA"
+      - name: Verify the public release
+        if: steps.current.outputs.deploy == 'true'
+        run: |
+          expected=$(node -p "'jobs' + require('./VERSION.json').current")
+          for attempt in {1..12}; do
+            if curl --fail --silent --show-error --max-time 10 "https://jobs.wasfai.com/api/version?commit=$GITHUB_SHA" |
+              jq -e --arg release "$expected" '.release == $release' >/dev/null; then
+              echo "Verified $expected on jobs.wasfai.com"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "::error::The public site did not report $expected."
+          exit 1
