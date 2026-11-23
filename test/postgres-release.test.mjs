@@ -9,7 +9,7 @@ import { onRequest as recruitment } from "../functions/api/recruitment/[[route]]
 import { onRequest as admin } from "../functions/api/admin/[[route]].js";
 import { onRequestGet as callback } from "../functions/api/auth/google/callback.js";
 import { onRequestPost as selectPlan } from "../functions/api/subscriptions/index.js";
-import { listPublicJobs } from "../functions/api/_public_jobs.js";
+import { listPublicJobs, searchPublicJobs, matchPublicJobs } from "../functions/api/_public_jobs.js";
 import { activatePaidSubscription, ensureSubscriptionSchema, planById } from "../functions/api/_subscriptions.js";
 import { getJobDb } from "../functions/api/_db.js";
 import { readUserState, writeUserState } from "../functions/api/_state.js";
@@ -98,6 +98,12 @@ test("PostgreSQL: OAuth, employer moderation, public filters and invoice replay 
     const jobId = (await create.json()).id;
     assert.equal((await call(owner, "moderation/jobs/" + jobId, "PATCH", { status: "published", review_note: "Approved for release test" })).status, 200);
     assert.equal((await listPublicJobs(testEnv, { city: "riyadh", min_salary: "12000", experience: "5" })).length, 1);
+    const search = await searchPublicJobs(testEnv, { q: "Mechanical Engineer", city: "الرياض" }, { limit: 1 });
+    assert.equal(search.total, 1);
+    assert.equal(search.jobs[0].public_id, "e-" + jobId);
+    const fit = await matchPublicJobs(testEnv, { target_roles: "Mechanical Engineer", target_locations: "الرياض", resume_skills: "engineering, installation, safety" }, 1);
+    assert.equal(fit.matched, 1);
+    assert.equal(fit.jobs[0].public_id, search.jobs[0].public_id);
     const invoice = { id: "pg-invoice", status: "paid", amount: 5000, currency: "SAR", metadata: { user_id: employer.sub, plan: plan.id } };
     await activatePaidSubscription(db, employer.sub, plan, invoice);
     const replay = await activatePaidSubscription(db, employer.sub, plan, invoice);

@@ -284,3 +284,7 @@
 
 - Use a dedicated encrypted DeepSeek binding for résumé coaching and selected-job CV generation
 
+## jobs76 — 2026-11-23 19:22
+
+- Add bilingual vacancy browsing and rank résumé matches using occupational evidence
+

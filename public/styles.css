@@ -2581,3 +2581,21 @@ body[data-theme="dark"] .search .kbd,
 body[data-theme="dark"] .action-stat {
   background: var(--surface-2);
 }
+
+.vacancy-search-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
+  gap: 10px;
+}
+
+.vacancy-filters summary {
+  cursor: pointer;
+  margin-block-end: 8px;
+}
+
+.job-search-card { display: grid; gap: 8px; }
+.job-search-card h2 { font-size: 1rem; margin: 0; }
+.job-search-card a { color: var(--ink); }
+.vacancy-paging { margin-block-start: 14px; }
+
+.resume-coach [hidden] { display: none; }
