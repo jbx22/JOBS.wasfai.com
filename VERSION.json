@@ -1,7 +1,7 @@
 {
-  "current": 70,
-  "lastDescription": "Use Career-Ops employer ingestion for Saudi vacancies and restore the HiringCafe portal link",
-  "lastAt": "2026-11-22 22:10",
+  "current": 71,
+  "lastDescription": "Improve admin access and account controls and integrate JOBS with SAdmin",
+  "lastAt": "2026-11-23 10:17",
   "history": [
     {
       "n": 1,
@@ -342,6 +342,11 @@
       "n": 70,
       "description": "Use Career-Ops employer ingestion for Saudi vacancies and restore the HiringCafe portal link",
       "at": "2026-11-22 22:10"
+    },
+    {
+      "n": 71,
+      "description": "Improve admin access and account controls and integrate JOBS with SAdmin",
+      "at": "2026-11-23 10:17"
     }
   ]
 }

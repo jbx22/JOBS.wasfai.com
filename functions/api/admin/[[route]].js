@@ -1,7 +1,8 @@
-import { adminJson, audit, ensureAdminSchema, requireAdmin, SUPER_ADMIN_EMAIL } from "../_admin.js";
+import { adminJson, audit, ensureAdminSchema, requireAdmin, SERVICE_ADMIN_EMAIL, SUPER_ADMIN_EMAIL } from "../_admin.js";
 import { DEEPSEEK_LABEL, deepseekModel } from "../_deepseek.js";
 import { moyasarInvoiceRecord, moyasarStatus } from "../_moyasar.js";
-import { noContent } from "../_state.js";
+import { ensureWorkspaceSchema, noContent } from "../_state.js";
+import { AuthError } from "../auth/_auth.js";
 import { ensureSubscriptionSchema, planById, publicPlans } from "../_subscriptions.js";
 import { reconcileMoyasarPayment } from "../payments/moyasar/_shared.js";
 
@@ -12,26 +13,27 @@ export async function onRequest(context) {
   const parts = url.pathname.replace(/^\/api\/admin\/?/, "").split("/").filter(Boolean);
 
   try {
-    if (method === "GET" && !parts[0]) return adminSession(context);
-    if (method === "GET" && parts[0] === "overview") return overview(context);
-    if (method === "GET" && parts[0] === "users") return users(context);
-    if (method === "PATCH" && parts[0] === "users" && parts[1]) return updateUser(context, parts[1]);
-    if (method === "GET" && parts[0] === "subscribers") return subscribers(context);
-    if (method === "PATCH" && parts[0] === "subscribers" && parts[1]) return updateSubscriber(context, parts[1]);
-    if (method === "GET" && parts[0] === "plans") return plans(context);
-    if (method === "GET" && parts[0] === "payments") return payments(context);
-    if (method === "POST" && parts[0] === "payments" && parts[2] === "sync") return syncPayment(context, parts[1]);
-    if (method === "POST" && parts[0] === "payments" && parts[2] === "activate") return activatePayment(context, parts[1]);
-    if (method === "GET" && parts[0] === "ai") return aiManagement(context);
-    if (method === "PUT" && parts[0] === "ai" && parts[1] === "settings") return updateAiSettings(context);
-    if (method === "GET" && parts[0] === "audit") return auditLogs(context);
-    if (method === "GET" && parts[0] === "admins") return admins(context);
-    if (method === "POST" && parts[0] === "admins") return createAdmin(context);
-    if (method === "PATCH" && parts[0] === "admins" && parts[1]) return updateAdmin(context, parts[1]);
-    if (method === "DELETE" && parts[0] === "admins" && parts[1]) return deleteAdmin(context, parts[1]);
+    if (method === "GET" && !parts[0]) return await adminSession(context);
+    if (method === "GET" && parts[0] === "overview") return await overview(context);
+    if (method === "GET" && parts[0] === "users") return await users(context);
+    if (method === "PATCH" && parts[0] === "users" && parts[1]) return await updateUser(context, parts[1]);
+    if (method === "GET" && parts[0] === "subscribers") return await subscribers(context);
+    if (method === "PATCH" && parts[0] === "subscribers" && parts[1]) return await updateSubscriber(context, parts[1]);
+    if (method === "GET" && parts[0] === "plans") return await plans(context);
+    if (method === "GET" && parts[0] === "payments") return await payments(context);
+    if (method === "POST" && parts[0] === "payments" && parts[2] === "sync") return await syncPayment(context, parts[1]);
+    if (method === "POST" && parts[0] === "payments" && parts[2] === "activate") return await activatePayment(context, parts[1]);
+    if (method === "GET" && parts[0] === "ai") return await aiManagement(context);
+    if (method === "PUT" && parts[0] === "ai" && parts[1] === "settings") return await updateAiSettings(context);
+    if (method === "GET" && parts[0] === "audit") return await auditLogs(context);
+    if (method === "GET" && parts[0] === "admins") return await admins(context);
+    if (method === "POST" && parts[0] === "admins") return await createAdmin(context);
+    if (method === "PATCH" && parts[0] === "admins" && parts[1]) return await updateAdmin(context, parts[1]);
+    if (method === "DELETE" && parts[0] === "admins" && parts[1]) return await deleteAdmin(context, parts[1]);
     return adminJson({ error: "Admin route was not found.", code: "NOT_FOUND" }, method === "GET" ? 404 : 405);
   } catch (error) {
-    console.error("Admin API failed", { path: url.pathname, name: error?.name, message: error?.message });
+    if (error instanceof AuthError) return adminJson({ error: error.message, code: error.code }, error.status);
+    console.error("Admin API failed", { path: url.pathname, name: error?.name, code: error?.code });
     return adminJson({ error: "Admin operation failed.", code: "ADMIN_API_FAILED" }, 500);
   }
 }
@@ -50,10 +52,11 @@ async function overview(context) {
   const activeUsers = await scalar(access.db, "SELECT COUNT(*) AS value FROM users WHERE account_status = 'active'");
   const subscribers = await scalar(access.db, "SELECT COUNT(*) AS value FROM subscriptions WHERE status IN ('active','trial')");
   const adminsCount = await scalar(access.db, "SELECT COUNT(*) AS value FROM admin_memberships WHERE status = 'active'");
+  await ensureWorkspaceSchema(access.db);
   const applications = await count(access.db, "applications");
   const resumes = await count(access.db, "resumes");
   const usage = await usageSummary(access.db);
-  const recent = await recentAudit(access.db, 8);
+  const recent = access.admin.role === "super_admin" ? await recentAudit(access.db, 8) : [];
   return adminJson({
     admin: access.admin,
     kpis: { users, active_users: activeUsers, subscribers, admins: adminsCount, applications, resumes, ai_cost_usd: usage.cost_usd },
@@ -68,10 +71,12 @@ async function users(context) {
   if (access.error) return access.error;
   await ensureUserTable(access.db);
   const url = new URL(context.request.url);
-  const q = `%${String(url.searchParams.get("q") || "").trim()}%`;
-  const status = String(url.searchParams.get("status") || "").trim();
-  const where = status ? "WHERE account_status = ? AND (email LIKE ? OR display_name LIKE ?)" : "WHERE email LIKE ? OR display_name LIKE ?";
-  const bindings = status ? [status, q, q] : [q, q];
+  const q = `%${String(url.searchParams.get("q") || "").trim().slice(0, 160).toLowerCase()}%`;
+  const status = cleanChoice(url.searchParams.get("status"), ["active", "suspended"], "");
+  const offset = Number(url.searchParams.get("offset"));
+  if (!Number.isSafeInteger(offset) || offset < 0) return adminJson({ error: "Invalid user page.", code: "BAD_OFFSET" }, 400);
+  const where = "WHERE (LOWER(u.email) LIKE ? OR LOWER(u.display_name) LIKE ?)" + (status ? " AND u.account_status = ?" : "");
+  const bindings = status ? [q, q, status] : [q, q];
   const { results = [] } = await access.db.prepare(`
     SELECT u.id, u.email, u.display_name, u.provider, u.account_status, u.created_at, u.last_login_at,
       u.accepted_terms_at, u.onboarding_completed_at,
@@ -80,21 +85,30 @@ async function users(context) {
     FROM users u
     LEFT JOIN subscriptions s ON s.user_id = u.id
     ${where}
-    ORDER BY u.last_login_at DESC
-    LIMIT 100
-  `).bind(...bindings).all();
-  return adminJson({ users: results });
+    ORDER BY u.last_login_at DESC, u.id
+    LIMIT 101 OFFSET ?
+  `).bind(...bindings, offset).all();
+  return adminJson({ users: results.slice(0, 100), next_offset: results.length > 100 ? offset + 100 : null });
 }
 
 async function updateUser(context, id) {
   const access = await requireAdmin(context);
   if (access.error) return access.error;
   const body = await readBody(context);
-  const status = cleanChoice(body.account_status, ["active", "suspended"], "active");
+  const status = cleanChoice(body.account_status, ["active", "suspended"], "");
+  if (!status) return adminJson({ error: "Select a valid account status.", code: "BAD_STATUS" }, 400);
+  const target = decodeURIComponent(id);
   await ensureUserTable(access.db);
-  await access.db.prepare("UPDATE users SET account_status = ? WHERE id = ?").bind(status, id).run();
-  await audit(context, access, "user.status_update", "user", id, { account_status: status });
-  return adminJson({ ok: true, id, account_status: status });
+  const user = await access.db.prepare("SELECT email FROM users WHERE id = ?").bind(target).first();
+  if (!user) return adminJson({ error: "User was not found.", code: "USER_NOT_FOUND" }, 404);
+  const member = await access.db.prepare("SELECT role FROM admin_memberships WHERE email = ? AND status = 'active'")
+    .bind(user.email.toLowerCase()).first();
+  if (protectedAdmin(user.email) || (member && (access.admin.role !== "super_admin" || (access.admin.service_identity && member.role === "super_admin")))) {
+    return adminJson({ error: "This account is protected.", code: "OWNER_PROTECTED" }, 409);
+  }
+  await access.db.prepare("UPDATE users SET account_status = ? WHERE id = ?").bind(status, target).run();
+  await audit(context, access, "user.status_update", "user", target, { account_status: status });
+  return adminJson({ ok: true, id: target, account_status: status });
 }
 
 async function subscribers(context) {
@@ -265,20 +279,43 @@ async function admins(context) {
   return adminJson({ admins: results });
 }
 
+function protectedAdmin(email) {
+  return [SUPER_ADMIN_EMAIL, SERVICE_ADMIN_EMAIL].includes(String(email).toLowerCase());
+}
+
+function adminTarget(db, target) {
+  return db.prepare(`SELECT email, role FROM admin_memberships
+    WHERE email = ? OR user_id = ? ORDER BY CASE WHEN email = ? THEN 0 ELSE 1 END LIMIT 1`)
+    .bind(target.toLowerCase(), target, target.toLowerCase()).first();
+}
+
+function adminChangeBlocked(access, target, role) {
+  if (protectedAdmin(target.email)) return true;
+  return access.admin.service_identity && (target.role === "super_admin" || role === "super_admin");
+}
+
+function protectedAdminResponse() {
+  return adminJson({ error: "This administrator is protected from this change.", code: "OWNER_PROTECTED" }, 409);
+}
+
 async function createAdmin(context) {
   const access = await requireAdmin(context, { superAdmin: true });
   if (access.error) return access.error;
   const body = await readBody(context);
   const email = String(body.email || "").trim().toLowerCase();
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return adminJson({ error: "Valid admin email is required.", code: "BAD_EMAIL" }, 400);
-  const role = cleanChoice(body.role, ["admin", "super_admin"], "admin");
+  if (email.length > 160 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return adminJson({ error: "Valid admin email is required.", code: "BAD_EMAIL" }, 400);
+  }
+  const role = body.role ?? "admin";
+  if (!["admin", "super_admin"].includes(role)) return adminJson({ error: "Select a valid role.", code: "BAD_ROLE" }, 400);
+  if (adminChangeBlocked(access, { email }, role)) return protectedAdminResponse();
   const displayName = String(body.display_name || email.split("@")[0]).trim().slice(0, 120);
-  await access.db.prepare(`
+  const result = await access.db.prepare(`
     INSERT INTO admin_memberships(user_id, email, display_name, role, status, scopes, created_by)
     VALUES (?, ?, ?, ?, 'active', ?, ?)
-    ON CONFLICT(email) DO UPDATE SET display_name=excluded.display_name, role=excluded.role,
-      status='active', scopes=excluded.scopes, revoked_at=NULL
+    ON CONFLICT(email) DO NOTHING
   `).bind(`email:${email}`, email, displayName, role, scopesFor(role), access.admin.email).run();
+  if (!result.meta.changes) return adminJson({ error: "This administrator already exists. Edit their existing record.", code: "ADMIN_EXISTS" }, 409);
   await audit(context, access, "admin.create", "admin", email, { role });
   return adminJson({ ok: true, email, role }, 201);
 }
@@ -287,27 +324,31 @@ async function updateAdmin(context, id) {
   const access = await requireAdmin(context, { superAdmin: true });
   if (access.error) return access.error;
   const body = await readBody(context);
-  const role = cleanChoice(body.role, ["admin", "super_admin"], "admin");
-  const status = cleanChoice(body.status, ["active", "revoked"], "active");
-  const target = decodeURIComponent(id).toLowerCase();
-  if (target === SUPER_ADMIN_EMAIL && status !== "active") {
-    return adminJson({ error: "The owner super admin cannot be revoked.", code: "OWNER_PROTECTED" }, 409);
+  const { role, status } = body;
+  if (!["admin", "super_admin"].includes(role) || !["active", "revoked"].includes(status)) {
+    return adminJson({ error: "Select a valid role and status.", code: "BAD_ADMIN_UPDATE" }, 400);
   }
-  await access.db.prepare(`
+  const target = await adminTarget(access.db, decodeURIComponent(id));
+  if (!target) return adminJson({ error: "Administrator was not found.", code: "ADMIN_NOT_FOUND" }, 404);
+  if (adminChangeBlocked(access, target, role)) return protectedAdminResponse();
+  const result = await access.db.prepare(`
     UPDATE admin_memberships SET role = ?, status = ?, scopes = ?, revoked_at = CASE WHEN ? = 'revoked' THEN CURRENT_TIMESTAMP ELSE NULL END
-    WHERE email = ? OR user_id = ?
-  `).bind(role, status, scopesFor(role), status, target, target).run();
-  await audit(context, access, "admin.update", "admin", target, { role, status });
-  return adminJson({ ok: true, id: target, role, status });
+    WHERE email = ? AND role = ?
+  `).bind(role, status, scopesFor(role), status, target.email, target.role).run();
+  if (!result.meta.changes) return adminJson({ error: "Administrator changed. Refresh and try again.", code: "ADMIN_CHANGED" }, 409);
+  await audit(context, access, "admin.update", "admin", target.email, { role, status });
+  return adminJson({ ok: true, id: target.email, role, status });
 }
 
 async function deleteAdmin(context, id) {
   const access = await requireAdmin(context, { superAdmin: true });
   if (access.error) return access.error;
-  const target = decodeURIComponent(id).toLowerCase();
-  if (target === SUPER_ADMIN_EMAIL) return adminJson({ error: "The owner super admin cannot be deleted.", code: "OWNER_PROTECTED" }, 409);
-  await access.db.prepare("DELETE FROM admin_memberships WHERE email = ? OR user_id = ?").bind(target, target).run();
-  await audit(context, access, "admin.delete", "admin", target, {});
+  const target = await adminTarget(access.db, decodeURIComponent(id));
+  if (!target) return adminJson({ error: "Administrator was not found.", code: "ADMIN_NOT_FOUND" }, 404);
+  if (adminChangeBlocked(access, target)) return protectedAdminResponse();
+  const result = await access.db.prepare("DELETE FROM admin_memberships WHERE email = ? AND role = ?").bind(target.email, target.role).run();
+  if (!result.meta.changes) return adminJson({ error: "Administrator changed. Refresh and try again.", code: "ADMIN_CHANGED" }, 409);
+  await audit(context, access, "admin.delete", "admin", target.email, {});
   return noContent();
 }
 
@@ -379,7 +420,10 @@ function buildAlerts(access, usage) {
 }
 
 async function readBody(context) {
-  try { return await context.request.json(); } catch { return {}; }
+  try {
+    const body = await context.request.json();
+    return body && typeof body === "object" && !Array.isArray(body) ? body : {};
+  } catch { return {}; }
 }
 
 function cleanChoice(value, allowed, fallback) {

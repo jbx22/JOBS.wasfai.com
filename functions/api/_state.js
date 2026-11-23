@@ -65,7 +65,7 @@ export async function requireAuthenticatedState(context) {
 }
 
 export async function readUserState(db, user) {
-  await ensureTable(db);
+  await ensureWorkspaceSchema(db);
   const { results: documents = [] } = await db.prepare(
     "SELECT document_key, payload, revision FROM user_state_documents WHERE user_id = ?",
   ).bind(user.sub).all();
@@ -86,7 +86,7 @@ export async function readUserState(db, user) {
 }
 
 export async function writeUserState(db, user, incoming, options = {}) {
-  await ensureTable(db);
+  await ensureWorkspaceSchema(db);
   const state = sanitizeState(incoming, buildInitialState(user));
   const expected = options.expectedRevisions || null;
   const { results: currentRows = [] } = await db.prepare(
@@ -179,7 +179,7 @@ export function upsertSourceState(state, source) {
   return source;
 }
 
-async function ensureTable(db) {
+export async function ensureWorkspaceSchema(db) {
   await db.prepare(TABLE_SQL).run();
   await db.prepare(DOCUMENT_TABLE_SQL).run();
   for (const sql of DOMAIN_TABLES_SQL) await db.prepare(sql).run();

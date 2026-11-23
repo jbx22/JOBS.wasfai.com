@@ -264,3 +264,7 @@
 ## jobs70 — 2026-11-22 22:10
 
 - Use Career-Ops employer ingestion for Saudi vacancies and restore the HiringCafe portal link
+## jobs71 — 2026-11-23 10:17
+
+- Improve admin access and account controls and integrate JOBS with SAdmin
+

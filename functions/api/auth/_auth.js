@@ -155,7 +155,7 @@ export async function readActiveSession(request, env = {}) {
   let account;
   try {
     account = await db.prepare(
-      "SELECT id, email, display_name, picture_url, account_status, created_at, last_login_at, accepted_terms_at, onboarding_completed_at FROM users WHERE id = ?",
+      "SELECT id, email, display_name, picture_url, provider, account_status, created_at, last_login_at, accepted_terms_at, onboarding_completed_at FROM users WHERE id = ?",
     ).bind(session.sub).first();
   } catch {
     throw new AuthError("ACCOUNT_STORAGE_UNAVAILABLE", 503, "Account verification is temporarily unavailable.");
