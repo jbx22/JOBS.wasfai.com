@@ -10,14 +10,13 @@
 
 const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
 import { recordAiUsage } from "./_ai_usage.js";
-import { DEEPSEEK_BASE_URL, DEEPSEEK_LABEL, deepseekModel } from "./_deepseek.js";
+import { DEEPSEEK_BASE_URL, DEEPSEEK_LABEL, deepseekModel, resumeDeepseekKey } from "./_deepseek.js";
 import { requireProtectedRequest } from "./_security.js";
 
 const AI_WRITER_MODELS = {
   deepseek: {
     provider: "deepseek",
     label: DEEPSEEK_LABEL,
-    keyNames: ["DEEPSEEK_API_KEY", "AI_API_KEY"],
     baseUrlNames: ["DEEPSEEK_BASE_URL", "AI_BASE_URL"],
     modelNames: ["DEEPSEEK_MODEL", "AI_MODEL"],
     defaultBaseUrl: DEEPSEEK_BASE_URL,
@@ -320,7 +319,7 @@ function buildWriter(env, key) {
     id: key,
     provider: config.provider,
     label: config.label,
-    apiKey: firstEnv(env, config.keyNames),
+    apiKey: config.provider === "deepseek" ? resumeDeepseekKey(env) : firstEnv(env, config.keyNames),
     baseUrl: firstEnv(env, config.baseUrlNames) || config.defaultBaseUrl,
     model: config.provider === "deepseek" ? deepseekModel(configuredModel) : configuredModel || config.defaultModel,
   };

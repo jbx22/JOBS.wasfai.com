@@ -280,3 +280,7 @@
 
 - Repair résumé extraction and generate complete, evidence-based DeepSeek résumés for the candidate or a selected job
 
+## jobs75 — 2026-11-23 19:05
+
+- Use a dedicated encrypted DeepSeek binding for résumé coaching and selected-job CV generation
+

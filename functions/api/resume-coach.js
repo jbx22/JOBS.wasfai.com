@@ -8,7 +8,7 @@
  */
 
 import { recordAiUsage } from "./_ai_usage.js";
-import { DEEPSEEK_BASE_URL, DEEPSEEK_MODEL } from "./_deepseek.js";
+import { DEEPSEEK_BASE_URL, DEEPSEEK_MODEL, resumeDeepseekKey } from "./_deepseek.js";
 import { requireProtectedRequest } from "./_security.js";
 import { AuthError } from "./auth/_auth.js";
 
@@ -44,7 +44,7 @@ export async function onRequestOptions() {
 
 async function improveWithAi(context, user, profile) {
   const env = context.env || {};
-  const apiKey = String(env.DEEPSEEK_API_KEY || "").trim() || String(env.AI_API_KEY || "").trim();
+  const apiKey = resumeDeepseekKey(env);
   if (!apiKey) {
     console.warn("Resume coach DeepSeek key is missing");
     return json({ error: "AI resume coaching is temporarily unavailable.", code: "AI_UNAVAILABLE" }, 503);

@@ -1,8 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { onRequestPost as coach } from "../functions/api/resume-coach.js";
-import { onRequestPost as probe } from "../functions/api/ai-health.js";
-import { DEEPSEEK_MODEL, deepseekModel } from "../functions/api/_deepseek.js";
+import { onRequestGet as readiness, onRequestPost as probe } from "../functions/api/ai-health.js";
+import { DEEPSEEK_MODEL, deepseekModel, resumeDeepseekKey } from "../functions/api/_deepseek.js";
 import { sessionCookie } from "../functions/api/auth/_auth.js";
 import { gatewayFixture, testEnv } from "./helpers/gateway.mjs";
 
@@ -128,4 +128,27 @@ test("the coach rejects provider truncation and fabricated dates even in otherwi
   assert.equal(res.status, 503);
   assert.equal((await res.json()).code, "AI_INVALID_DRAFT");
   assert.equal(attempts, 2);
+});
+
+test("résumé provider key takes precedence and missing scoped credentials use existing bindings", async (t) => {
+  assert.equal(resumeDeepseekKey({ JOBS_RESUME_DEEPSEEK_API_KEY: " ", DEEPSEEK_API_KEY: " global " }), "global");
+  assert.equal(resumeDeepseekKey({ DEEPSEEK_API_KEY: " ", AI_API_KEY: " legacy " }), "legacy");
+  const scoped = { ...testEnv, JOBS_RESUME_DEEPSEEK_API_KEY: " resume-fixture " };
+  const { addUser } = gatewayFixture(t, { otherFetch: (url, init) => {
+    assert.equal(url, "https://api.deepseek.com/v1/chat/completions");
+    assert.equal(init.headers.Authorization, "Bearer resume-fixture");
+    const call = JSON.parse(init.body);
+    return completion(call.max_tokens === 24 ? "READY" : JSON.stringify(drafts));
+  } });
+  addUser();
+  const health = await readiness({ env: scoped, request: await request() });
+  assert.equal((await health.json()).providers.deepseek, "configured");
+  const disabled = await readiness({ env: { ...scoped, JOBS_RESUME_DEEPSEEK_API_KEY: " " }, request: await request() });
+  assert.equal((await disabled.json()).providers.deepseek, "missing");
+  const both = { ...scoped, DEEPSEEK_API_KEY: "global-fixture", AI_API_KEY: "legacy-fixture" };
+  assert.equal((await coach({ env: both, request: await request() })).status, 200);
+  const result = await probe({ env: { ...both, AI_HEALTH_TOKEN: "health-fixture" }, request: new Request("https://jobs.wasfai.com/api/ai-health?provider=deepseek", {
+    method: "POST", headers: { Authorization: "Bearer health-fixture" },
+  }) });
+  assert.equal((await result.json()).ready, true);
 });

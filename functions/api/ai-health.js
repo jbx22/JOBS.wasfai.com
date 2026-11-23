@@ -1,12 +1,12 @@
 import { getAuthenticatedUser, json } from "./_state.js";
-import { DEEPSEEK_BASE_URL, DEEPSEEK_MODEL, deepseekModel } from "./_deepseek.js";
+import { DEEPSEEK_BASE_URL, DEEPSEEK_MODEL, deepseekModel, resumeDeepseekKey } from "./_deepseek.js";
 
 /** Safe, account-only readiness signal. It never exposes keys or provider errors. */
 export async function onRequestGet(context) {
   const user = await getAuthenticatedUser(context);
   if (!user) return json({ error: "Sign in is required to check AI availability.", code: "AUTH_REQUIRED" }, 401);
   const env = context.env || {};
-  const deepseek = Boolean(env.DEEPSEEK_API_KEY || env.AI_API_KEY);
+  const deepseek = Boolean(resumeDeepseekKey(env));
   const openrouter = Boolean(env.OPENROUTER_API_KEY);
   const openai = Boolean(env.OPENAI_API_KEY);
   return json({
@@ -30,7 +30,7 @@ export async function onRequestPost(context) {
   }
   const probeCoach = new URL(context.request.url).searchParams.get("provider") === "deepseek";
   if (!probeCoach && env.OPENAI_API_KEY) return probeOpenai(env);
-  const apiKey = env.DEEPSEEK_API_KEY || env.AI_API_KEY;
+  const apiKey = resumeDeepseekKey(env);
   if (!apiKey) return json({ ready: false, provider: "deepseek", error: "missing_key" }, 503);
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 12000);
