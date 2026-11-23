@@ -106,8 +106,10 @@ export async function requireAdmin(context, options = {}) {
       "SELECT user_id, email, display_name, role, status, scopes, last_active_at FROM admin_memberships WHERE email = ? AND status = 'active'",
     ).bind(SERVICE_ADMIN_EMAIL).first();
     if (!serviceRow) return { error: json({ error: "Service admin identity could not be resolved.", code: "SERVICE_IDENTITY_UNRESOLVED" }, 401) };
+    const operatorEmail = String(context.request.headers.get("x-jobs-admin-operator") || "").trim().toLowerCase();
     return {
       db,
+      operatorEmail: operatorEmail.length <= 160 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(operatorEmail) ? operatorEmail : "",
       session: { sub: serviceRow.user_id, email: serviceRow.email, name: serviceRow.display_name },
       admin: {
         ...serviceRow,
@@ -121,6 +123,7 @@ export async function requireAdmin(context, options = {}) {
   const active = await readActiveSession(context.request, context.env || {});
   const session = active?.session;
   if (!session) return { error: json({ error: "Sign in with Google to access admin.", code: "AUTH_REQUIRED" }, 401) };
+  if (active.account.provider !== "google" || (session.provider && session.provider !== "google")) return { error: json({ error: "Sign in with an approved Google account.", code: "GOOGLE_SIGN_IN_REQUIRED" }, 403) };
   await ensureAdminSchema(db);
   const email = String(session.email || "").trim().toLowerCase();
   // Reserved for server-to-server access only: a Google session can never claim it.
@@ -137,8 +140,8 @@ export async function requireAdmin(context, options = {}) {
     `).bind(session.sub, email, session.name || "Jaber Abosaag").run();
   }
   const member = await db.prepare(
-    "SELECT user_id, email, display_name, role, status, scopes, last_active_at FROM admin_memberships WHERE (user_id = ? OR email = ?) AND status = 'active'",
-  ).bind(session.sub, email).first();
+    "SELECT user_id, email, display_name, role, status, scopes, last_active_at FROM admin_memberships WHERE email = ? AND status = 'active'",
+  ).bind(email).first();
   if (!member) return { error: json({ error: "This Google account is not an active admin.", code: "ADMIN_REQUIRED" }, 403) };
   if (options.superAdmin && member.role !== "super_admin") {
     return { error: json({ error: "Super admin permission is required.", code: "SUPER_ADMIN_REQUIRED" }, 403) };
@@ -172,12 +175,12 @@ export async function audit(context, access, action, resourceType, resourceId = 
       action,
       resourceType,
       String(resourceId || ""),
-      JSON.stringify(metadata || {}),
+      JSON.stringify(access.operatorEmail ? { ...metadata, central_operator: access.operatorEmail } : metadata),
       context.request.headers.get("CF-Connecting-IP") || "",
       String(context.request.headers.get("User-Agent") || "").slice(0, 240),
     ).run();
-  } catch {
-    // Admin actions should not fail only because audit persistence is temporarily unavailable.
+  } catch (error) {
+    console.error("Admin audit write failed", { action, resourceType, name: error?.name });
   }
 }
 

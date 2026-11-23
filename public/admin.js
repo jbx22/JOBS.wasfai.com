@@ -4,7 +4,11 @@ const root = document.getElementById("admin-root");
 const mode = document.body.dataset.adminMode === "super" ? "super" : "admin";
 const state = {
   admin: null,
-  tab: mode === "super" ? "audit" : "overview",
+  tab: "overview",
+  accessError: null,
+  notice: "",
+  saving: false,
+  loadId: 0,
   overview: null,
   users: [],
   subscribers: [],
@@ -13,64 +17,95 @@ const state = {
   audit: [],
   admins: [],
   q: "",
+  status: "",
+  offset: 0,
+  nextOffset: null,
   error: "",
   loading: true,
 };
 
-const NAV = mode === "super"
-  ? [
-      ["audit", "Audit Log", "AL"],
-      ["admins", "Admin Team", "AT"],
-      ["users", "Users", "US"],
-      ["subscribers", "Subscribers", "SB"],
-      ["billing", "Billing & Moyasar", "PM"],
-      ["ai", "AI & Cost", "AI"],
-    ]
-  : [
-      ["overview", "Overview", "OV"],
-      ["users", "Users", "US"],
-      ["subscribers", "Subscribers", "SB"],
-      ["billing", "Billing & Moyasar", "PM"],
-      ["ai", "AI & Cost", "AI"],
-    ];
+const OWNER_EMAIL = "jabosaag@gmail.com";
+const SERVICE_EMAIL = "service@sadmin.wasfai.com";
+const NAV = [
+  ["overview", "Overview", "reports"],
+  ["users", "Users", "users"],
+  ["subscribers", "Subscribers", "subscribers"],
+  ["billing", "Billing & Moyasar", "billing"],
+  ["ai", "AI & Cost", "ai"],
+  ["audit", "Audit Log"],
+  ["admins", "Admin Team"],
+];
+
+function can(scope) {
+  if (state.admin?.role === "super_admin") return true;
+  if (!scope) return false;
+  try { return JSON.parse(state.admin?.scopes || "[]").includes(scope); }
+  catch { return false; }
+}
+
+function visibleNav() {
+  return NAV.filter(([id, , scope]) => (scope || mode === "super") && can(scope));
+}
 
 init();
 
 async function init() {
+  state.loading = true;
+  state.accessError = null;
+  render();
   try {
     const session = await api("/api/admin");
+    if (mode === "super" && session.admin.role !== "super_admin") {
+      state.accessError = { status: 403, message: "This Google account does not have Super Admin access." };
+      return;
+    }
     state.admin = session.admin;
-    await loadCurrent();
+    const tab = visibleNav()[0]?.[0];
+    if (tab) await refresh(tab);
   } catch (error) {
-    state.error = error.code || "AUTH_REQUIRED";
+    state.accessError = error;
   } finally {
     state.loading = false;
     render();
   }
 }
 
-async function loadCurrent() {
-  if (state.tab === "overview") state.overview = await api("/api/admin/overview");
-  if (state.tab === "users") state.users = (await api(`/api/admin/users?q=${encodeURIComponent(state.q)}`)).users || [];
-  if (state.tab === "subscribers") state.subscribers = (await api("/api/admin/subscribers")).subscribers || [];
-  if (state.tab === "billing") state.billing = await api("/api/admin/payments");
-  if (state.tab === "ai") state.ai = await api("/api/admin/ai");
-  if (state.tab === "audit") state.audit = (await api("/api/admin/audit")).audit || [];
-  if (state.tab === "admins") state.admins = (await api("/api/admin/admins")).admins || [];
+async function loadCurrent(tab) {
+  if (tab === "overview") return api("/api/admin/overview");
+  if (tab === "users") return api(`/api/admin/users?${new URLSearchParams({ q: state.q, status: state.status, offset: state.offset })}`);
+  if (tab === "subscribers") return (await api("/api/admin/subscribers")).subscribers || [];
+  if (tab === "billing") return api("/api/admin/payments");
+  if (tab === "ai") return api("/api/admin/ai");
+  if (tab === "audit") return (await api("/api/admin/audit")).audit || [];
+  if (tab === "admins") return (await api("/api/admin/admins")).admins || [];
 }
 
-async function refresh(tab = state.tab) {
+async function refresh(tab = state.tab, preserveNotice = false) {
+  if (state.saving || !visibleNav().some(([id]) => id === tab)) return;
+  const loadId = ++state.loadId;
   state.tab = tab;
   state.loading = true;
   state.error = "";
+  if (!preserveNotice) state.notice = "";
   render();
   try {
-    await loadCurrent();
+    const data = await loadCurrent(tab);
+    if (loadId !== state.loadId) return;
+    state[tab] = tab === "users" ? data.users || [] : data;
+    if (tab === "users") state.nextOffset = data.next_offset;
   } catch (error) {
-    state.error = error.message || "Admin data could not be loaded.";
+    if (loadId !== state.loadId) return;
+    if (error.status === 401 || error.code === "ACCOUNT_RESTRICTED" || error.code === "ADMIN_REQUIRED" || error.code === "SUPER_ADMIN_REQUIRED") {
+      state.admin = null;
+      state.accessError = error;
+    } else {
+      state.error = error.message || "Admin data could not be loaded.";
+    }
   } finally {
-    state.loading = false;
-    render();
+    if (loadId === state.loadId) {
+      state.loading = false;
+      render();
+    }
   }
 }
 
@@ -81,36 +116,41 @@ function render() {
   }
   if (!state.admin) {
     const next = encodeURIComponent(location.pathname);
+    const error = state.accessError;
+    const canSignIn = !error?.status || error.status < 500;
     root.innerHTML = `
       <div class="login-gate">
         <div class="login-box">
           <img src="/brand-logo-192.png" alt="JOBS.wasfai.com">
           <h1>${mode === "super" ? "Super Admin" : "Admin"} access</h1>
-          <p>Sign in with an approved Google account. Super admin is reserved for jabosaag@gmail.com.</p>
-          <a class="btn primary" href="/api/auth/google/start?next=${next}">Sign in with Google</a>
+          <p role="status">${esc(error?.status === 401 || !error ? "Sign in with an approved Google account." : error.message)}</p>
+          ${canSignIn ? `<a class="btn primary" href="/api/auth/google/start?next=${next}">${error?.status === 403 ? "Use another Google account" : "Sign in with Google"}</a>` : '<button class="btn primary" data-check-access>Retry access check</button>'}
+          ${mode === "super" ? '<a class="btn" href="/admin/">Open Admin Console</a>' : ""}
           <a class="btn" href="/app">Back to website</a>
         </div>
       </div>`;
+    root.querySelector("[data-check-access]")?.addEventListener("click", init);
     return;
   }
   root.innerHTML = `
     <div class="admin-app">
       <aside class="admin-sidebar">
         <a class="brand" href="/app"><img src="/brand-logo-192.png" alt=""><span><strong>JOBS.wasfai.com</strong><small>${mode === "super" ? "Super Admin" : "Admin Console"}</small></span></a>
-        <div class="nav-title">Workspace</div>
-        <nav class="nav-group">${NAV.map(([id, label, ico]) => `<button class="nav-btn ${state.tab === id ? "active" : ""}" data-tab="${id}"><span class="ico">${ico}</span><span>${label}</span></button>`).join("")}</nav>
+        <nav class="nav-group" aria-label="Admin sections">${visibleNav().map(([id, label]) => `<button class="nav-btn ${state.tab === id ? "active" : ""}" ${state.tab === id ? 'aria-current="page"' : ""} data-tab="${id}">${label}</button>`).join("")}</nav>
       </aside>
       <main class="admin-main">
         <header class="admin-topbar">
           <div><h1>${pageTitle()}</h1><p>${esc(state.admin.email)} - ${esc(state.admin.role.replace("_", " "))}</p></div>
           <div class="admin-actions">
             ${mode !== "super" && state.admin.role === "super_admin" ? `<a class="btn blue" href="/super-admin/">Super Admin</a>` : ""}
-            <a class="btn" href="/recruitment-admin">Recruitment</a>
+            ${can("employers") || can("jobs") ? '<a class="btn" href="/recruitment-admin">Recruitment</a>' : ""}
+            ${state.admin.email?.toLowerCase() === OWNER_EMAIL ? '<a class="btn" href="https://sadmin.wasfai.com/?site=jobs">Central Admin</a>' : ""}
             <a class="btn" href="/app">Website</a>
             <button class="btn ghost" data-refresh>Refresh</button>
+            <button class="btn ghost" data-sign-out>Sign out</button>
           </div>
         </header>
-        <section class="content">${state.loading ? `<div class="loading">Loading...</div>` : state.error ? `<div class="error">${esc(state.error)}</div>` : renderTab()}</section>
+        <section class="content" aria-busy="${state.loading || state.saving}">${state.notice ? `<p class="alert teal" role="status">${esc(state.notice)}</p>` : ""}${state.loading ? `<div class="loading" role="status">Loading…</div>` : state.error ? `<div class="error" role="alert">${esc(state.error)}</div>` : visibleNav().length ? renderTab() : '<div class="empty">No admin sections have been assigned to this account.</div>'}</section>
       </main>
     </div>`;
   bind();
@@ -142,17 +182,18 @@ function renderOverview() {
       <section class="panel"><div class="panel-head"><h2>Operational alerts</h2></div><div class="panel-body stack">
         ${(data.alerts || []).map((a) => `<div class="alert ${a.tone === "teal" ? "teal" : ""}"><strong>${esc(a.label)}</strong><br><span>${esc(a.detail)}</span></div>`).join("") || `<div class="empty">No active alerts.</div>`}
       </div></section>
-      <section class="panel"><div class="panel-head"><h2>Recent audit</h2></div><div class="panel-body">${auditList(data.recent_audit || [])}</div></section>
+      ${state.admin.role === "super_admin" ? `<section class="panel"><div class="panel-head"><h2>Recent audit</h2></div><div class="panel-body">${auditList(data.recent_audit || [])}</div></section>` : ""}
     </div>`;
 }
 
 function renderUsers() {
   return `
     <section class="panel">
-      <div class="panel-head"><h2>User management</h2><div class="toolbar"><input class="input" data-search placeholder="Search email or name" value="${esc(state.q)}"><button class="btn" data-run-search>Search</button></div></div>
+      <div class="panel-head"><h2>User management</h2><form class="toolbar" data-user-search><input class="input" name="q" aria-label="Search email or name" placeholder="Search email or name" value="${esc(state.q)}"><select class="select" name="status" aria-label="Account status"><option value="">All statuses</option><option value="active" ${state.status === "active" ? "selected" : ""}>Active</option><option value="suspended" ${state.status === "suspended" ? "selected" : ""}>Suspended</option></select><button class="btn">Search</button></form></div>
       <div class="table-wrap"><table><thead><tr><th>User</th><th>Status</th><th>Subscription</th><th>Last login</th><th>Actions</th></tr></thead><tbody>
         ${state.users.map((u) => `<tr><td><strong>${esc(u.display_name || "Unnamed")}</strong><small>${esc(u.email)}</small></td><td>${badge(u.account_status)}</td><td>${badge(u.plan, "blue")} ${badge(u.subscription_status, "gold")}</td><td>${date(u.last_login_at)}</td><td><div class="row-actions">${userActions(u)}</div></td></tr>`).join("")}
       </tbody></table></div>${state.users.length ? "" : `<div class="panel-body"><div class="empty">No users found.</div></div>`}
+      ${state.offset || state.nextOffset !== null ? `<div class="panel-body toolbar"><button class="btn" data-user-page="${Math.max(0, state.offset - 100)}" ${!state.offset ? "disabled" : ""}>Previous</button><span>Page ${state.offset / 100 + 1}</span><button class="btn" data-user-page="${state.nextOffset}" ${state.nextOffset === null ? "disabled" : ""}>Next</button></div>` : ""}
     </section>`;
 }
 
@@ -242,8 +283,8 @@ function renderAi() {
       <section class="panel"><div class="panel-head"><h2>Budget controls</h2></div><div class="panel-body stack">
         <div class="toolbar">
           <label class="field"><span>Monthly budget USD</span><input class="input" data-ai-setting="monthly_budget_usd" value="${esc(ai.settings?.monthly_budget_usd || "100")}"></label>
-          <label class="field"><span>Default provider</span><select class="select" data-ai-setting="default_provider"><option value="deepseek">DeepSeek</option><option value="openrouter">OpenRouter</option></select></label>
-          <button class="btn primary" data-save-ai>Save settings</button>
+          <label class="field"><span>Default provider</span><select class="select" data-ai-setting="default_provider"><option value="deepseek" ${(ai.settings?.default_provider || "deepseek") === "deepseek" ? "selected" : ""}>DeepSeek</option><option value="openrouter" ${ai.settings?.default_provider === "openrouter" ? "selected" : ""}>OpenRouter</option>${ai.settings?.default_provider === "luna" ? '<option value="luna" selected>Luna</option>' : ""}</select></label>
+          ${state.admin.role === "super_admin" ? '<button class="btn primary" data-save-ai>Save settings</button>' : ""}
         </div>
         <div class="empty">API keys stay in Cloudflare environment secrets and are never shown here.</div>
       </div></section>
@@ -276,10 +317,26 @@ function renderAdmins() {
 function bind() {
   document.querySelectorAll("[data-tab]").forEach((button) => button.addEventListener("click", () => refresh(button.dataset.tab)));
   document.querySelectorAll("[data-refresh]").forEach((button) => button.addEventListener("click", () => refresh()));
-  const search = document.querySelector("[data-search]");
-  if (search) search.addEventListener("input", (event) => { state.q = event.target.value; });
-  const runSearch = document.querySelector("[data-run-search]");
-  if (runSearch) runSearch.addEventListener("click", () => refresh("users"));
+  root.querySelector("[data-sign-out]")?.addEventListener("click", async () => {
+    try {
+      await api("/api/auth/logout", { method: "POST" });
+      location.reload();
+    } catch (error) {
+      reportActionError(error);
+    }
+  });
+  root.querySelector("[data-user-search]")?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    state.q = String(form.get("q") || "").trim();
+    state.status = String(form.get("status") || "");
+    state.offset = 0;
+    refresh("users");
+  });
+  root.querySelectorAll("[data-user-page]").forEach((button) => button.addEventListener("click", () => {
+    state.offset = Number(button.dataset.userPage);
+    refresh("users");
+  }));
   document.querySelectorAll("[data-user-status]").forEach((button) => button.addEventListener("click", () => updateUser(button.dataset.userStatus, button.dataset.status)));
   document.querySelectorAll("[data-sub-edit]").forEach((button) => button.addEventListener("click", () => editSubscriber(button.dataset.subEdit)));
   document.querySelectorAll("[data-payment-sync]").forEach((button) => button.addEventListener("click", () => paymentAction(button.dataset.paymentSync, "sync")));
@@ -293,57 +350,85 @@ function bind() {
   document.querySelectorAll("[data-admin-delete]").forEach((button) => button.addEventListener("click", () => deleteAdmin(button.dataset.adminDelete)));
 }
 
-async function updateUser(id, status) {
-  if (!confirm(`Set this user to ${status}?`)) return;
-  await api(`/api/admin/users/${encodeURIComponent(id)}`, { method: "PATCH", body: { account_status: status } });
-  refresh("users");
+function reportActionError(error) {
+  const alert = root.querySelector("[data-action-error]") || document.createElement("p");
+  alert.className = "error";
+  alert.dataset.actionError = "";
+  alert.setAttribute("role", "alert");
+  alert.textContent = error.message || "The change could not be saved.";
+  root.querySelector(".content").prepend(alert);
 }
 
-async function editSubscriber(id) {
-  const plan = prompt("Plan: free, gold_monthly, gold_annual, pro, business, vip", "gold_monthly");
-  if (!plan) return;
-  const status = prompt("Status: trial, active, pending_payment, past_due, paused, cancelled", "active") || "active";
-  const limit = prompt("Monthly AI limit USD", "10") || "10";
-  await api(`/api/admin/subscribers/${encodeURIComponent(id)}`, { method: "PATCH", body: { plan, status, ai_monthly_limit_usd: Number(limit) } });
-  refresh("subscribers");
-}
-
-async function paymentAction(id, action) {
-  if (action === "activate" && !confirm("Manually activate this subscription without a verified online payment? This action is audited.")) return;
+async function runAction(path, options) {
+  if (state.saving) return;
+  state.saving = true;
+  state.notice = "";
+  root.querySelectorAll("button").forEach((button) => { button.disabled = true; });
   try {
-    await api(`/api/admin/payments/${encodeURIComponent(id)}/${action}`, { method: "POST" });
-    await refresh("billing");
+    await api(path, options);
   } catch (error) {
-    state.error = error.message || "Payment action failed.";
-    render();
+    state.saving = false;
+    if (error.status === 401 || error.code === "ACCOUNT_RESTRICTED" || error.code === "ADMIN_REQUIRED" || error.code === "SUPER_ADMIN_REQUIRED") {
+      state.admin = null;
+      state.accessError = error;
+      render();
+      return;
+    }
+    root.querySelectorAll("button").forEach((button) => { button.disabled = false; });
+    root.querySelectorAll("[data-user-page]").forEach((button) => {
+      button.disabled = button.textContent === "Previous" ? !state.offset : state.nextOffset === null;
+    });
+    reportActionError(error);
+    return;
   }
+  state.saving = false;
+  state.notice = "Change saved.";
+  await refresh(state.tab, true);
 }
 
-async function saveAiSettings() {
+function updateUser(id, status) {
+  if (!confirm(`Set this user to ${status}?`)) return;
+  return runAction(`/api/admin/users/${encodeURIComponent(id)}`, { method: "PATCH", body: { account_status: status } });
+}
+
+function editSubscriber(id) {
+  const subscriber = state.subscribers.find((item) => item.id === id);
+  if (!subscriber) return;
+  const plan = prompt("Plan: free, gold_monthly, gold_annual, pro, business, vip", subscriber.plan);
+  if (plan === null) return;
+  const status = prompt("Status: trial, active, pending_payment, past_due, paused, cancelled", subscriber.subscription_status);
+  if (status === null) return;
+  const limit = prompt("Monthly AI limit USD", String(subscriber.ai_monthly_limit_usd));
+  if (limit === null) return;
+  return runAction(`/api/admin/subscribers/${encodeURIComponent(id)}`, { method: "PATCH", body: { plan, status, ai_monthly_limit_usd: Number(limit) } });
+}
+
+function paymentAction(id, action) {
+  if (action === "activate" && !confirm("Manually activate this subscription without a verified online payment? This action is audited.")) return;
+  return runAction(`/api/admin/payments/${encodeURIComponent(id)}/${action}`, { method: "POST" });
+}
+
+function saveAiSettings() {
   const body = {};
   document.querySelectorAll("[data-ai-setting]").forEach((input) => { body[input.dataset.aiSetting] = input.value; });
-  await api("/api/admin/ai/settings", { method: "PUT", body });
-  refresh("ai");
+  return runAction("/api/admin/ai/settings", { method: "PUT", body });
 }
 
-async function createAdmin() {
+function createAdmin() {
   const email = document.querySelector("[data-new-admin-email]")?.value || "";
   const display_name = document.querySelector("[data-new-admin-name]")?.value || "";
   const role = document.querySelector("[data-new-admin-role]")?.value || "admin";
-  await api("/api/admin/admins", { method: "POST", body: { email, display_name, role } });
-  refresh("admins");
+  return runAction("/api/admin/admins", { method: "POST", body: { email, display_name, role } });
 }
 
-async function updateAdmin(id, body) {
+function updateAdmin(id, body) {
   if (!confirm(`Update admin ${id}?`)) return;
-  await api(`/api/admin/admins/${encodeURIComponent(id)}`, { method: "PATCH", body });
-  refresh("admins");
+  return runAction(`/api/admin/admins/${encodeURIComponent(id)}`, { method: "PATCH", body });
 }
 
-async function deleteAdmin(id) {
+function deleteAdmin(id) {
   if (!confirm(`Delete admin ${id}? This removes admin access.`)) return;
-  await api(`/api/admin/admins/${encodeURIComponent(id)}`, { method: "DELETE" });
-  refresh("admins");
+  return runAction(`/api/admin/admins/${encodeURIComponent(id)}`, { method: "DELETE" });
 }
 
 async function api(path, options = {}) {
@@ -356,6 +441,7 @@ async function api(path, options = {}) {
   if (!response.ok) {
     const error = new Error(data.error || `Request failed: ${response.status}`);
     error.code = data.code;
+    error.status = response.status;
     throw error;
   }
   return data;
@@ -366,12 +452,14 @@ function kpi(label, value, trend) {
 }
 
 function userActions(u) {
+  if ([OWNER_EMAIL, SERVICE_EMAIL].includes(u.email?.toLowerCase())) return "Protected account";
   return u.account_status === "active"
     ? `<button class="btn danger" data-user-status="${esc(u.id)}" data-status="suspended">Suspend</button>`
     : `<button class="btn primary" data-user-status="${esc(u.id)}" data-status="active">Reactivate</button>`;
 }
 
 function adminActions(a) {
+  if ([OWNER_EMAIL, SERVICE_EMAIL].includes(a.email?.toLowerCase())) return "Protected account";
   const id = esc(a.email || a.user_id);
   const roleSwitch = a.role === "super_admin"
     ? `<button class="btn" data-admin-role="${id}" data-role="admin">Make admin</button>`
