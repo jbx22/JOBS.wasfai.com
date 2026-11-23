@@ -1,7 +1,7 @@
 {
-  "current": 71,
-  "lastDescription": "Improve admin access and account controls and integrate JOBS with SAdmin",
-  "lastAt": "2026-11-23 10:17",
+  "current": 72,
+  "lastDescription": "Add department admin workspaces, scoped assignments, and source-backed operator dashboards",
+  "lastAt": "2026-11-23 10:53",
   "history": [
     {
       "n": 1,
@@ -347,6 +347,11 @@
       "n": 71,
       "description": "Improve admin access and account controls and integrate JOBS with SAdmin",
       "at": "2026-11-23 10:17"
+    },
+    {
+      "n": 72,
+      "description": "Add department admin workspaces, scoped assignments, and source-backed operator dashboards",
+      "at": "2026-11-23 10:53"
     }
   ]
 }

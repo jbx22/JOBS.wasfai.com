@@ -4,6 +4,7 @@ Sequential snapshots of the project. Each version is a frozen copy of the source
 
 | Version | Date | Description |
 | --- | --- | --- |
+| jobs72 | 2026-11-23 10:53 | Add department admin workspaces, scoped assignments, and source-backed operator dashboards |
 | jobs71 | 2026-11-23 10:17 | Improve admin access and account controls and integrate JOBS with SAdmin |
 | jobs70 | 2026-11-22 22:10 | Use Career-Ops employer ingestion for Saudi vacancies and restore the HiringCafe portal link |
 | jobs69 | 2026-11-22 21:40 | Ingest official Saudi government vacancies and improve job-feed reliability |

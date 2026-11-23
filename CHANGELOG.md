@@ -268,3 +268,7 @@
 
 - Improve admin access and account controls and integrate JOBS with SAdmin
 
+## jobs72 — 2026-11-23 10:53
+
+- Add department admin workspaces, scoped assignments, and source-backed operator dashboards
+
