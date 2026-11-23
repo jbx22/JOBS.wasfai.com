@@ -8,6 +8,7 @@ const requiredTypes = {
   ...Object.fromEntries(Object.keys(config.vars).map((name) => [name, "plain_text"])),
   AUTH_COOKIE_SECRET: "secret_text",
   DEEPSEEK_API_KEY: "secret_text",
+  JOBS_RESUME_DEEPSEEK_API_KEY: "secret_text",
 };
 
 function assertBindingTypes(variables, required) {
@@ -59,7 +60,7 @@ async function check(phase) {
     const bindings = productionBindings(project);
     if (phase === "before") {
       writeFileSync(inventory, JSON.stringify(bindings), { mode: 0o600 });
-      console.log("Verified the production project and required binding types, including encrypted DEEPSEEK_API_KEY.");
+      console.log("Verified the production project and required binding types, including encrypted JOBS_RESUME_DEEPSEEK_API_KEY.");
       return;
     }
     const deployment = project.canonical_deployment;
@@ -67,7 +68,7 @@ async function check(phase) {
       const originalTypes = JSON.parse(readFileSync(inventory, "utf8"));
       assertBindingTypes(project.deployment_configs.production.env_vars, originalTypes);
       verifyDeployment(await read(`/deployments/${encodeURIComponent(deployment.id)}`), sha, originalTypes);
-      console.log("Verified the production commit and deployment binding types, including encrypted DEEPSEEK_API_KEY.");
+      console.log("Verified the production commit and deployment binding types, including encrypted JOBS_RESUME_DEEPSEEK_API_KEY.");
       return;
     }
     if (attempt < 11) await sleep(5000);

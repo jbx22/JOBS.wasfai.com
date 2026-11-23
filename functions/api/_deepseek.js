@@ -6,3 +6,8 @@ export function deepseekModel(configured) {
   const model = String(configured || "").trim();
   return !model || /^deepseek-v4-flash(?:-vision-exp)?$/i.test(model) ? DEEPSEEK_MODEL : model;
 }
+
+export function resumeDeepseekKey(env) {
+  return [env.JOBS_RESUME_DEEPSEEK_API_KEY, env.DEEPSEEK_API_KEY, env.AI_API_KEY]
+    .find(value => typeof value === "string" && value.trim())?.trim() || "";
+}

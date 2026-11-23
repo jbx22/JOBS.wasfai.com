@@ -31,9 +31,9 @@ const rows = [
 const review = { approved: true, requirements_complete: true, factual_risks: [], missing_evidence: [], ats_checks: [], reviewer_summary: "Four years against a two-year requirement.", requirements: rows };
 const env = { ...testEnv, DEEPSEEK_API_KEY: "test-provider-key" };
 
-async function call(handler, payload) {
+async function call(handler, payload, bindings = env) {
   const cookie = (await sessionCookie({ sub: "google-user" }, env.AUTH_COOKIE_SECRET)).split(";")[0];
-  return handler({ env, request: new Request("https://jobs.wasfai.com/api/ghostwriter", { method: "POST", headers: { Cookie: cookie, "Content-Type": "application/json" }, body: JSON.stringify(payload) }) });
+  return handler({ env: bindings, request: new Request("https://jobs.wasfai.com/api/ghostwriter", { method: "POST", headers: { Cookie: cookie, "Content-Type": "application/json" }, body: JSON.stringify(payload) }) });
 }
 
 function providerReply(value) {
@@ -153,4 +153,17 @@ test("a truncated generation is retried and invalid model output is never logged
   assert.equal((await response.json()).code, "AI_INVALID_DRAFT");
   assert.equal(attempts, 2);
   assert.deepEqual(db.prepare("SELECT status FROM ai_usage WHERE route='ghostwriter.generate' ORDER BY id").all().map(x => x.status), ["invalid_output", "invalid_output"]);
+});
+
+test("job generation and independent review use the dedicated résumé DeepSeek binding", async (t) => {
+  let calls = 0;
+  const { addUser } = gatewayFixture(t, { otherFetch: (_url, init) => {
+    assert.equal(init.headers.Authorization, "Bearer resume-only");
+    return providerReply(++calls === 1 ? draft : review);
+  } });
+  addUser();
+  const result = await call(generate, { job, profile, ai_model: "deepseek" }, { ...testEnv, JOBS_RESUME_DEEPSEEK_API_KEY: "resume-only" });
+  assert.equal(result.status, 200);
+  assert.equal((await result.json()).quality_review.approved, true);
+  assert.equal(calls, 2);
 });

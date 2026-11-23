@@ -17,6 +17,7 @@ function project() {
       env_vars: {
         ...Object.fromEntries(Object.keys(config.vars).map((key) => [key, variable("plain_text")])),
         AUTH_COOKIE_SECRET: variable("secret_text"), DEEPSEEK_API_KEY: variable("secret_text"),
+        JOBS_RESUME_DEEPSEEK_API_KEY: variable("secret_text"),
         ANOTHER_SECRET: variable("secret_text"),
       },
     } },
@@ -26,7 +27,7 @@ function project() {
 test("verifies the exact production commit, resource bindings and encrypted variable metadata without reading values", () => {
   const p = project();
   const names = productionBindings(p);
-  assert.equal(names.DEEPSEEK_API_KEY, "secret_text");
+  assert.equal(names.JOBS_RESUME_DEEPSEEK_API_KEY, "secret_text");
   const deployment = { environment: "production", deployment_trigger: { metadata: { commit_hash: sha } }, env_vars: { ...p.deployment_configs.production.env_vars } };
   verifyDeployment(deployment, sha, names);
   assert.throws(() => verifyDeployment(deployment, "wrong-commit", names), /different commit/);
@@ -38,6 +39,9 @@ test("blocks publishing if the configured DeepSeek variable has the wrong type o
   const p = project();
   p.deployment_configs.production.env_vars.DEEPSEEK_API_KEY = variable("plain_text");
   assert.throws(() => productionBindings(p), /DEEPSEEK_API_KEY/);
+  const withoutResumeKey = project();
+  delete withoutResumeKey.deployment_configs.production.env_vars.JOBS_RESUME_DEEPSEEK_API_KEY;
+  assert.throws(() => productionBindings(withoutResumeKey), /JOBS_RESUME_DEEPSEEK_API_KEY/);
   const other = project();
   other.deployment_configs.production.r2_buckets.RESUME_FILES.name = "wrong";
   assert.throws(() => productionBindings(other), /RESUME_FILES/);

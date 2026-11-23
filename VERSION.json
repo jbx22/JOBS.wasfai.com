@@ -1,7 +1,7 @@
 {
-  "current": 74,
-  "lastDescription": "Repair résumé extraction and generate complete, evidence-based DeepSeek résumés for the candidate or a selected job",
-  "lastAt": "2026-11-23 18:39",
+  "current": 75,
+  "lastDescription": "Use a dedicated encrypted DeepSeek binding for résumé coaching and selected-job CV generation",
+  "lastAt": "2026-11-23 19:05",
   "history": [
     {
       "n": 1,
@@ -362,6 +362,11 @@
       "n": 74,
       "description": "Repair résumé extraction and generate complete, evidence-based DeepSeek résumés for the candidate or a selected job",
       "at": "2026-11-23 18:39"
+    },
+    {
+      "n": 75,
+      "description": "Use a dedicated encrypted DeepSeek binding for résumé coaching and selected-job CV generation",
+      "at": "2026-11-23 19:05"
     }
   ]
 }
