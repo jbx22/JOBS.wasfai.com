@@ -1,7 +1,7 @@
 /* JOBS.wasfai.com — Arabic-first RTL mobile PWA */
 "use strict";
 
-import { inferResumeSignals, inferRoleFromResume, readableResumeText } from "./resume-signals.js";
+import { inferResumeSignals, readableResumeText } from "./resume-signals.js";
 import { extractResumeFileText, resumeExtractionErrorMessage } from "./resume-extraction.js";
 
 /* ---------------- Constants ---------------- */
@@ -129,29 +129,29 @@ const I18N = {
     searchJobs: "ابحث عن وظيفة",
     mobileWorkflow: "مسار الجوال",
     homeTitle: "أربع خطوات من السيرة إلى طلب متابع",
-    homeReady: "ملفك المعتمد نشط الآن. راجع الفرص وولّد حزم التقديم.",
-    homeLocked: "اعتمد السيرة الرئيسية أولاً حتى تكون المطابقة مبنية على بياناتك الحقيقية.",
-    profileApproved: "الملف معتمد",
+    homeReady: "سيرتك جاهزة للبحث عن فرص تناسب خبراتك.",
+    homeLocked: "تصفّح الوظائف أو أضف سيرتك للحصول على نتائج مخصصة.",
+    profileApproved: "السيرة جاهزة",
     profileRequired: "الملف مطلوب",
     completeProfile: "أكمل الملف",
-    completeProfileReady: "السيرة المعتمدة جاهزة للمطابقة.",
+    completeProfileReady: "السيرة جاهزة للمطابقة.",
     completeProfileText: "الصق السيرة كاملة، حسّنها، ثم اعتمد الملف الرئيسي.",
     addSources: "إدارة المصادر",
     addSourcesText: "المصادر تعمل تلقائياً. افتحها فقط لإضافة أو تعديل مصدر.",
     reviewMatches: "راجع الفرص",
     reviewMatchesText: "افتح الوظائف المرتبة وانقلها داخل مسار التقديم.",
-    reviewMatchesLocked: "درجات المطابقة القوية تظهر بعد اعتماد الملف.",
+    reviewMatchesLocked: "تصفّح الشواغر حسب المسمى والموقع.",
     generatePackage: "ولّد الحزمة",
     generatePackageText: "أنشئ سيرة وخطاباً وأسئلة مقابلة بالعربية والإنجليزية.",
     trackApplications: "تابع الطلبات",
     trackApplicationsText: "انقل الفرص بين قيد المراجعة، جاهزة، تم التقديم، والمتابعة.",
     ready: "جاهز",
     locked: "مغلق",
-    gateTitle: "المطابقة مقفلة حتى يكتمل التعريف",
-    gateText: "ابدأ برفع السيرة PDF/TXT أو لصقها. بعد الاعتماد سنعرض الوظائف الأقرب للسيرة فقط.",
+    gateTitle: "ابحث باستخدام سيرتك",
+    gateText: "ارفع السيرة أو الصقها لتخصيص البحث وفق خبراتك.",
     nextMatches: "أفضل الفرص",
     open: "فتح",
-    matchesEmptyReady: "اضغط بحث ذكي لجلب وظائف مرتبطة بالسيرة المعتمدة.",
+    matchesEmptyReady: "ابدأ البحث بسيرتك لعرض الفرص المناسبة.",
     matchesEmptyLocked: "أكمل الملف أولاً. بعدها تظهر هنا أفضل الفرص.",
     pipelineSnapshot: "لمحة المسار",
     details: "تفاصيل",
@@ -180,29 +180,29 @@ const I18N = {
     searchJobs: "Search jobs",
     mobileWorkflow: "Mobile workflow",
     homeTitle: "Four steps from resume to tracked application",
-    homeReady: "Your approved profile is active. Review matches and generate packages.",
-    homeLocked: "Approve the master resume first so matching is based on real profile data.",
-    profileApproved: "Profile approved",
+    homeReady: "Find openings that match the experience in your résumé.",
+    homeLocked: "Browse open jobs, or add your résumé to find personalized matches.",
+    profileApproved: "Résumé ready",
     profileRequired: "Profile required",
     completeProfile: "Complete Profile",
-    completeProfileReady: "Approved resume is ready for matching.",
+    completeProfileReady: "Your résumé is ready for matching.",
     completeProfileText: "Paste the full resume, improve it, and approve the master profile.",
     addSources: "Manage Sources",
     addSourcesText: "Sources run automatically. Open only to add or edit a source.",
     reviewMatches: "Review Matches",
     reviewMatchesText: "Open ranked jobs and move them through the pipeline.",
-    reviewMatchesLocked: "Strong match scores unlock after profile approval.",
+    reviewMatchesLocked: "Search open vacancies by title and location.",
     generatePackage: "Generate Package",
     generatePackageText: "Create bilingual CV, cover letter, interview prep, then export.",
     trackApplications: "Track Applications",
     trackApplicationsText: "Move jobs through review, ready, applied, and follow-up.",
     ready: "Ready",
     locked: "Locked",
-    gateTitle: "Matching is locked until onboarding is complete",
-    gateText: "Start by uploading a PDF/TXT resume or pasting it. After approval we only show jobs closest to the resume.",
+    gateTitle: "Search with your résumé",
+    gateText: "Upload or paste your résumé to search by your experience.",
     nextMatches: "Next matches",
     open: "Open",
-    matchesEmptyReady: "Tap smart search to pull resume-matched jobs.",
+    matchesEmptyReady: "Search with your résumé to see matching jobs.",
     matchesEmptyLocked: "Complete Profile first. Then this area shows your best matches.",
     pipelineSnapshot: "Pipeline snapshot",
     details: "Details",
@@ -398,7 +398,7 @@ function routeOf() {
   return { name: "search" };
 }
 
-function countByStatus(jobs = state.jobs) {
+function countByStatus(jobs = workspaceJobs()) {
   const counts = { discovered: 0, processing: 0, ready: 0, applied: 0, in_progress: 0, expired: 0, skipped: 0 };
   for (const job of jobs) {
     counts[job.status] = (counts[job.status] || 0) + 1;
@@ -408,7 +408,7 @@ function countByStatus(jobs = state.jobs) {
 
 function countBySource() {
   const counts = {};
-  for (const job of state.jobs) {
+  for (const job of workspaceJobs()) {
     counts[job.source] = (counts[job.source] || 0) + 1;
   }
   return counts;
@@ -750,10 +750,6 @@ function approvedProfile() {
   };
 }
 
-function onboardingReady() {
-  return masterResumeReady();
-}
-
 function resumeSearchTerms(profile = masterResumeReady() ? approvedProfile() : state.profile) {
   const raw = [
     profile?.target_roles,
@@ -791,46 +787,37 @@ function resumeSearchTerms(profile = masterResumeReady() ? approvedProfile() : s
     .slice(0, 80);
 }
 
-function resumeJobHits(job, terms = resumeSearchTerms()) {
-  const haystack = [
-    job.title,
-    job.employer,
-    job.description,
-    job.fit_explanation,
-    job.tailored_resume,
-  ].join(" ").toLowerCase();
-  return terms.filter((term) => haystack.includes(term)).length;
+function matchingReady() {
+  return originalResumeReady() || masterResumeReady();
 }
 
-function jobResumeRelevance(job, terms = resumeSearchTerms()) {
-  if (!onboardingReady()) return 0;
-  const hits = resumeJobHits(job, terms);
-  return Math.min(99, Math.round(Number(job.score || 0) + Math.min(hits * 4, 28)));
-}
-
-function resumeRelevantJobs(jobs = state.jobs) {
-  if (!onboardingReady()) return [];
-  const terms = resumeSearchTerms();
-  return [...jobs]
-    .map((job) => ({ ...job, resume_hits: resumeJobHits(job, terms), relevance_score: job.match_breakdown?.length ? job.score : jobResumeRelevance(job, terms) }))
-    .filter((job) => job.match_eligible === true || (!job.match_breakdown?.length && job.resume_hits > 0))
-    .sort((a, b) => Number(b.relevance_score || b.score || 0) - Number(a.relevance_score || a.score || 0));
+function workspaceJobs() {
+  return state.jobs.filter((job) => !["example", "demo"].includes(job.data_quality)
+    && job.source_quality !== "example" && job.source !== "resume-match"
+    && !/^(demo-|resume-match-)/.test(job.id)
+    && !(/^scan-.*-[0-9a-z]+-[1-3]$/.test(job.id) && !job.last_verified_at && !job.imported)
+    && !(/^job-[1-5]$/.test(job.id) && !job.source_url && !job.imported));
 }
 
 function approvedMatchingProfile() {
+  const profile = state.profile || {};
+  const master = state.approvedMasterResume ? state.masterResume || {} : {};
+  const source = profile.resume_text || master.en || master.ar || "";
+  const extracted = (!profile.target_roles || !profile.resume_skills) && source ? inferResumeSignals(source) : {};
   const coachProfile = state.resumeCoach?.search_profile || {};
   const targetTitles = Array.isArray(coachProfile.target_titles) ? coachProfile.target_titles.join(", ") : "";
   const keywords = Array.isArray(coachProfile.keywords) ? coachProfile.keywords.join(", ") : "";
   const locations = Array.isArray(coachProfile.locations) ? coachProfile.locations.join(", ") : "";
   return {
     ...(state.profile || {}),
-    target_roles: targetTitles || state.profile?.target_roles || "",
-    target_locations: locations || state.profile?.target_locations || "",
-    resume_skills: keywords || state.profile?.resume_skills || "",
-    resume_seniority: coachProfile.seniority || state.profile?.resume_seniority || "",
-    resume_text: approvedProfile().approved_master_resume || state.profile?.resume_text || "",
-    master_resume_ar: state.masterResume?.ar || "",
-    master_resume_en: state.masterResume?.en || "",
+    target_roles: profile.target_roles || extracted.target_roles || targetTitles || "",
+    target_locations: profile.target_locations || extracted.target_locations || locations || "",
+    resume_skills: profile.resume_skills || extracted.resume_skills || keywords || "",
+    resume_seniority: profile.resume_seniority || extracted.resume_seniority || coachProfile.seniority || "",
+    resume_regions: profile.resume_regions || extracted.resume_regions || "",
+    resume_text: state.profile?.resume_text || "",
+    master_resume_ar: state.approvedMasterResume ? state.masterResume?.ar || "" : "",
+    master_resume_en: state.approvedMasterResume ? state.masterResume?.en || "" : "",
   };
 }
 
@@ -838,17 +825,20 @@ function importLiveMatchedJob(job) {
   const source = job.source_id || job.source || "live";
   return {
     id: `live-${job.id}`,
+    public_id: job.public_id,
+    public_url: "/vacancies/" + encodeURIComponent(job.public_id),
+    employment_type: job.employment_type || "",
     title: job.title || "Untitled role",
     employer: job.employer || "Unknown employer",
     source,
     location: job.location || "",
-    score: Number(job.score ?? 50),
+    score: Number(job.score ?? 0),
     status: "discovered",
     deadline: "",
     description: job.description || "",
     tailored_resume: "",
     cover_letter: "",
-    fit_explanation: job.fit_explanation || "تمت المطابقة مقابل السيرة المعتمدة.",
+    fit_explanation: job.fit_explanation || "",
     source_url: job.source_url || "",
     posted_at: job.posted_at || "",
     valid_through: job.valid_through || "",
@@ -860,6 +850,7 @@ function importLiveMatchedJob(job) {
     fit_grade: job.fit_grade || "",
     match_evidence: Array.isArray(job.match_evidence) ? job.match_evidence : [],
     missing_requirements: Array.isArray(job.missing_requirements) ? job.missing_requirements : [],
+    requirements_to_verify: Array.isArray(job.requirements_to_verify) ? job.requirements_to_verify : [],
     role_family: job.role_family || "",
     seniority: job.seniority || "",
     sector: job.sector || "",
@@ -871,42 +862,6 @@ function importLiveMatchedJob(job) {
       },
     ],
   };
-}
-
-function fallbackMatchedJobsFromProfile(profile = approvedMatchingProfile()) {
-  const roles = String(profile.target_roles || profile.resume_seniority || "")
-    .split(/[,،|/]/)
-    .map((item) => item.trim())
-    .filter(Boolean);
-  const keywords = resumeSearchTerms(profile).slice(0, 12);
-  const locations = String(profile.target_locations || profile.resume_regions || "Saudi Arabia")
-    .split(/[,،|/]/)
-    .map((item) => item.trim())
-    .filter(Boolean);
-  const now = Date.now().toString(36);
-  const titleBase = roles[0] || inferRoleFromResume(profile.resume_text || profile.resume_skills || "") || "دور مناسب للسيرة";
-  const location = locations[0] || "Saudi Arabia";
-  const descriptions = [
-    `فرصة مبنية على السيرة المعتمدة مع تركيز على ${keywords.slice(0, 6).join(", ") || "الخبرات الأساسية"} والتنفيذ والنتائج القابلة للقياس.`,
-    `فرصة قريبة من ${keywords.slice(2, 8).join(", ") || "خبرات السيرة"} وخبرة العمل في ${location}.`,
-    `مرشح للمراجعة اليدوية بناءً على السيرة. راجع جهة العمل والرابط قبل التقديم.`,
-  ];
-  return descriptions.map((description, index) => ({
-    id: `resume-match-${now}-${index + 1}`,
-    title: index === 0 ? titleBase : `${titleBase} ${index === 1 ? "استشاري" : "مدير"}`,
-    employer: index === 0 ? "مطابقة السيرة" : index === 1 ? "مصدر مناسب للمراجعة" : "قائمة مراجعة يدوية",
-    source: "resume-match",
-    source_url: "",
-    location,
-    score: 82 - index * 7,
-    status: "discovered",
-    deadline: "",
-    description,
-    tailored_resume: "",
-    cover_letter: "",
-    fit_explanation: `تمت المطابقة من كلمات السيرة: ${keywords.slice(0, 8).join(", ") || "السيرة المعتمدة"}.`,
-    timeline: [{ label: "مطابقة من السيرة", timestamp: new Date().toISOString(), tone: "neutral" }],
-  }));
 }
 
 function clientFallbackKit(job, profile = state.profile) {
@@ -1037,11 +992,11 @@ function applyResumeSignalsFromText(text, preserveEdits = false) {
 }
 
 function jobById(id) {
-  return state.jobs.find((x) => x.id === id) || state.jobs[0];
+  return workspaceJobs().find((x) => x.id === id);
 }
 
 function sameSourceJobs(job, limit = 3) {
-  return state.jobs.filter((x) => x.source === job.source && x.id !== job.id).slice(0, limit);
+  return workspaceJobs().filter((x) => x.source === job.source && x.id !== job.id).slice(0, limit);
 }
 
 function replaceJob(updated) {
@@ -1141,27 +1096,11 @@ async function saveApplicationTracking(job) {
   });
 }
 
-function topJobsByScore(limit = 3) {
-  const jobs = onboardingReady() ? resumeRelevantJobs(state.jobs) : state.jobs;
-  return [...jobs].sort((a, b) => Number(b.relevance_score || b.score || 0) - Number(a.relevance_score || a.score || 0)).slice(0, limit);
-}
-
-function recentJobs(limit = 4) {
-  return [...state.jobs].slice(0, limit);
-}
-
-function trackedAndMatchedJobs() {
-  const matched = resumeRelevantJobs(state.jobs);
-  const matchedIds = new Set(matched.map((job) => job.id));
-  return [...matched, ...state.jobs.filter((job) => job.imported && !matchedIds.has(job.id))];
-}
-
 function filteredJobs() {
   const q = state.query.trim().toLowerCase();
-  const jobs = trackedAndMatchedJobs().filter((job) => {
-    if (state.jobFilter === "matched" && Number(job.relevance_score || job.score || 0) < 80) return false;
+  const jobs = workspaceJobs().filter((job) => {
+    if (state.jobFilter === "matched" && !job.match_eligible) return false;
     if (state.jobFilter !== "all" && state.jobFilter !== "matched" && job.status !== state.jobFilter) return false;
-    if (state.region && !job.imported && !matchesRegion(job, state.region)) return false;
     if (!q) return true;
     return (
       job.title.toLowerCase().includes(q) ||
@@ -1173,12 +1112,6 @@ function filteredJobs() {
   if (state.jobSort === "employer") return jobs.sort((a, b) => a.employer.localeCompare(b.employer, state.locale));
   if (state.jobSort === "recent") return jobs.sort((a, b) => String(b.posted_at || b.updated_at || "").localeCompare(String(a.posted_at || a.updated_at || "")));
   return jobs.sort((a, b) => Number(b.relevance_score ?? b.score ?? 0) - Number(a.relevance_score ?? a.score ?? 0));
-}
-
-function matchesRegion(job, region) {
-  if (!region) return true;
-  if (region === "عن بعد") return /remote|عن بعد/i.test(job.location);
-  return job.location.includes(region) || job.location.includes(region.replace("Saudi Arabia", "السعودية"));
 }
 
 /* ---------------- API ---------------- */
@@ -1342,10 +1275,10 @@ function workflowSteps() {
       icon: iconList(),
       title: "راجع الوظائف المناسبة",
       short: "اعرض الفرص المرتبطة بالسيرة",
-      text: "نعرض فقط الفرص الأقرب لسيرتك المعتمدة ونخفي الضجيج عن المسار الرئيسي.",
+      text: "تصفّح الوظائف أو ابحث عن الفرص المناسبة لخبراتك.",
       action: "الوظائف",
       route: "/jobs",
-      done: (state.jobs || []).length > 0,
+      done: workspaceJobs().length > 0,
     },
     {
       icon: iconSpark(),
@@ -1354,7 +1287,7 @@ function workflowSteps() {
       text: "AI كاتب ينتج سيرة عربية، سيرة إنجليزية، خطابين، وأسئلة مقابلة لكل وظيفة.",
       action: "AI كاتب",
       route: "/jobs",
-      done: Object.keys(state.ghostwriter || {}).length > 0,
+      done: workspaceJobs().some(job => ghostwriterFor(job.id)),
     },
     {
       icon: iconCheck(),
@@ -1363,7 +1296,7 @@ function workflowSteps() {
       text: "غيّر الحالة واحفظ المتابعة بدون الرجوع لمصادر الوظائف إلا عند الحاجة.",
       action: "النتيجة",
       route: "/results",
-      done: (state.jobs || []).some((job) => ["applied", "in_progress"].includes(job.status)),
+      done: workspaceJobs().some((job) => ["applied", "in_progress"].includes(job.status)),
     },
   ];
 }
@@ -1371,13 +1304,13 @@ function workflowSteps() {
 /* ---------------- Home / Search ---------------- */
 function renderCommandHome() {
   const counts = countByStatus();
-  const ready = onboardingReady();
-  const matched = ready ? topJobsByScore(2) : [];
-  const generatedPackages = Object.keys(state.ghostwriter || {}).length;
-  const regionChips = REGIONS.map((r) => `<button class="chip ${state.region === r.id ? "active" : ""}" data-region="${esc(r.id)}">${esc(r.label)}</button>`).join("");
+  const en = state.locale === "en";
+  const ready = matchingReady();
+  const matched = lastMatches.profileKey === matchingProfileKey() ? lastMatches.jobs.slice(0, 2) : [];
+  const generatedPackages = workspaceJobs().filter(job => ghostwriterFor(job.id)).length;
   const actionCards = [
     [tr("completeProfile"), ready ? tr("completeProfileReady") : tr("completeProfileText"), "/account", iconUser(), ready ? tr("ready") : `${profileCompleteness()}%`, ready],
-    [tr("reviewMatches"), ready ? tr("reviewMatchesText") : tr("reviewMatchesLocked"), "/jobs", iconList(), ready ? `${state.jobs.length}` : tr("locked"), ready && state.jobs.length > 0],
+    [tr("reviewMatches"), ready ? tr("reviewMatchesText") : tr("reviewMatchesLocked"), ready ? "/jobs?view=matches" : "/jobs", iconList(), "", matched.length > 0],
     [tr("generatePackage"), tr("generatePackageText"), "/jobs", iconSpark(), `${generatedPackages}`, generatedPackages > 0],
     [tr("trackApplications"), tr("trackApplicationsText"), "/results", iconCheck(), `${counts.applied + counts.in_progress}`, counts.applied + counts.in_progress > 0],
   ]
@@ -1391,7 +1324,7 @@ function renderCommandHome() {
     .join("");
   const selectedHtml = matched
     .map(
-      (j) => `<div class="item" data-job="${esc(j.id)}">
+      (j) => `<div class="item" data-open-search-job="${esc(j.public_id)}">
         <div class="score-ring" style="--score:${j.score}"><div style="display:grid;place-items:center;line-height:1"><span style="font-size:18px;font-weight:800;color:var(--teal-2)">${j.score}</span><small style="font-size:9px;color:var(--muted)">${esc(tr("match"))}</small></div></div>
         <div class="body"><h4>${esc(j.title)}</h4><small>${esc(j.employer)} · ${esc(j.location)} · ${esc(sourceLabel(j.source))}</small></div>
       </div>`,
@@ -1401,9 +1334,7 @@ function renderCommandHome() {
   shell(
     `${banner()}
     <section class="section">
-      <div class="search">${iconSearch()}<input data-search value="${esc(state.query)}" placeholder="${esc(tr("searchJobs"))}" /><span class="kbd">⌘ K</span></div>
-      <div class="spacer-12"></div>
-      <div class="chips">${regionChips}</div>
+      ${jobSearchForm("browse", {}, true)}
     </section>
     <section class="section">
       <div class="mobile-command">
@@ -1421,15 +1352,15 @@ function renderCommandHome() {
       <p>${esc(tr("gateText"))}</p>
       <button class="btn primary" data-nav="/account">${iconUser()} ${esc(tr("completeProfile"))}</button>
     </div></section>`}
-    ${ready ? `<section class="section"><button class="btn primary full" data-search-approved-jobs>${iconSearch()} بحث ذكي عن وظائف مناسبة للسيرة</button></section>` : ""}
+    <section class="section"><button class="btn primary full" data-search-approved-jobs>${iconSearch()} ${en ? "Find jobs matching my résumé" : "ابحث عن وظائف تناسب سيرتي"}</button></section>
     <section class="section">
-      <div class="section-head"><h2>${esc(tr("nextMatches"))}</h2><button class="more" data-nav="/jobs">${esc(tr("open"))}</button></div>
+      <div class="section-head"><h2>${esc(tr("nextMatches"))}</h2><button class="more" data-nav="/jobs?view=matches">${esc(tr("open"))}</button></div>
       <div class="selected-jobs">${selectedHtml || `<p class="empty">${ready ? esc(tr("matchesEmptyReady")) : esc(tr("matchesEmptyLocked"))}</p>`}</div>
     </section>
     <section class="section">
       <div class="section-head"><h2>${esc(tr("pipelineSnapshot"))}</h2><button class="more" data-nav="/results">${esc(tr("details"))}</button></div>
       <div class="status-grid">
-        <div class="stat teal"><span class="v">${state.jobs.length}</span><span class="l">${esc(tr("jobs"))}</span></div>
+        <div class="stat teal"><span class="v">${workspaceJobs().length}</span><span class="l">${esc(tr("jobs"))}</span></div>
         <div class="stat"><span class="v">${counts.ready || 0}</span><span class="l">${esc(tr("readyJobs"))}</span></div>
         <div class="stat"><span class="v">${counts.in_progress || 0}</span><span class="l">${esc(tr("followUp"))}</span></div>
         <div class="stat gold"><span class="v">${generatedPackages}</span><span class="l">حزم</span></div>
@@ -1444,86 +1375,7 @@ function renderCommandHome() {
 }
 
 function renderSearch() {
-  return renderCommandHome();
-  const counts = countByStatus();
-  const sources = state.sources.filter((s) => s.enabled);
-  const customSources = sources.filter((s) => s.custom);
-  const matched = topJobsByScore(2);
-  const recent = recentJobs(2);
-  const regionChips = REGIONS.map((r) => `<button class="chip ${state.region === r.id ? "active" : ""}" data-region="${esc(r.id)}">${esc(r.label)}</button>`).join("");
-  const sourceChips = sources
-    .slice(0, 8)
-    .map((s) => `<button class="chip" data-source-filter="${esc(s.id)}"><span class="dot"></span>${esc(s.label)}</button>`)
-    .join("");
-
-  const selectedHtml = matched
-    .map(
-      (j) => `<div class="item">
-        <div class="score-ring" style="--score:${j.score}"><div style="display:grid;place-items:center;line-height:1"><span style="font-size:18px;font-weight:800;color:var(--teal-2)">${j.score}</span><small style="font-size:9px;color:var(--muted)">مطابقة</small></div></div>
-        <div class="body">
-          <h4>${esc(j.title)}</h4>
-          <small>${esc(j.employer)} · ${esc(j.location)} · ${esc(sourceLabel(j.source))}</small>
-        </div>
-      </div>`,
-    )
-    .join("");
-
-  const customSourcesHtml = customSources.length
-    ? customSources
-        .map(
-          (s) => `<div class="source-row">
-            ${sourceIconHtml(s.id)}
-            <div><div class="name">${esc(s.label)}</div><div class="sub">${esc(s.region || "مخصص")} · ${s.job_count || 0} وظائف</div></div>
-            <span class="badge muted">${esc(s.connector_mode === "public_html" ? "HTML" : s.connector_mode === "approved_api" ? "API" : "يدوي")}</span>
-          </div>`,
-        )
-        .join("")
-    : `<p class="muted tiny center" style="padding:10px 0">لم تضف مصادر مخصصة بعد. أضف موقعك من الإعدادات.</p>`;
-
-  const trendSvg = buildTrendSvg(state.jobs);
-
-  shell(
-    `${banner()}
-    <section class="section">
-      <div class="search">${iconSearch()}<input data-search value="${esc(state.query)}" placeholder="ابحث عن وظيفة" /><span class="kbd">⌘ K</span></div>
-      <div class="spacer-12"></div>
-      <div class="chips">${regionChips}</div>
-    </section>
-    ${renderHowItWorks("home")}
-    <section class="section">
-      <div class="section-head"><h2>المصادر</h2><button class="more" data-nav="/settings">المزيد</button></div>
-      <div class="chips">${sourceChips}</div>
-    </section>
-    <section class="section">
-      <div class="section-head"><h2>حالة الطلبات</h2><button class="more" data-nav="/jobs">القائمة</button></div>
-      <div class="status-grid">
-        <div class="stat teal"><span class="v">${(counts.discovered || 0) + (counts.ready || 0) + (counts.applied || 0) + (counts.in_progress || 0) + (counts.processing || 0)}</span><span class="l">الكلية</span></div>
-        <div class="stat gold"><span class="v">${counts.processing || 0}</span><span class="l">قيد المعالجة</span></div>
-        <div class="stat teal"><span class="v">${counts.ready || 0}</span><span class="l">جاهزة للإرسال</span></div>
-        <div class="stat"><span class="v">${counts.in_progress || 0}</span><span class="l">متابعاتي</span></div>
-      </div>
-    </section>
-    <section class="section">
-      <div class="section-head"><h2>فرص مختارة لك</h2><button class="more" data-nav="/jobs">عرض الكل</button></div>
-      <div class="selected-jobs">${selectedHtml || `<p class="empty">لم تظهر فرص بعد. شغّل فحص المصدر من الإعدادات.</p>`}</div>
-    </section>
-    <section class="section">
-      <div class="section-head"><h2>المصادر المضافة</h2><button class="more" data-nav="/settings">إدارة</button></div>
-      <div class="card">${customSourcesHtml}</div>
-    </section>
-    <section class="section">
-      <div class="section-head"><h2>النتيجة</h2><button class="more" data-nav="/results">تفاصيل</button></div>
-      <div class="card results-card">
-        <div class="row">
-          <div class="metric"><strong>${counts.ready + counts.applied + counts.in_progress}</strong><span>فرص</span></div>
-          <div class="metric"><strong>${counts.in_progress}</strong><span>متابعات</span></div>
-          <div class="metric"><strong>${pct(counts.applied, counts.ready + counts.applied + counts.in_progress)}%</strong><span>مرتجعة</span></div>
-        </div>
-        ${trendSvg}
-      </div>
-    </section>`,
-    { screen: "search" },
-  );
+  renderCommandHome();
 }
 
 function pct(a, b) {
@@ -1533,8 +1385,14 @@ function pct(a, b) {
 
 function buildTrendSvg(jobs) {
   if (jobs.length === 0) return '<p class="muted tiny center" style="padding:8px 0">لا توجد بيانات بعد.</p>';
-  // 7-day buckets by index, simulating 7 day trend
-  const points = [4, 6, 5, 8, 7, 10, jobs.length];
+  const dayMs = 86400000;
+  const today = Math.floor(Date.now() / dayMs);
+  const points = Array(7).fill(0);
+  for (const job of jobs) {
+    const day = Math.floor(Date.parse(job.application?.applied_at || job.posted_at || job.updated_at || "") / dayMs);
+    const index = day - today + 6;
+    if (Number.isInteger(index) && index >= 0 && index < points.length) points[index]++;
+  }
   const max = Math.max(...points, 1);
   const w = 220, h = 60;
   const step = w / (points.length - 1);
@@ -1549,12 +1407,197 @@ function buildTrendSvg(jobs) {
 }
 
 /* ---------------- Jobs list ---------------- */
+let searchPage = { key: "", mode: "", jobs: [] };
+let lastMatches = { profileKey: "", jobs: [] };
+
+function matchingProfileKey() {
+  return JSON.stringify([state.session?.user?.sub || "", approvedMatchingProfile()]);
+}
+
+function targetJobs() {
+  const saved = workspaceJobs();
+  const recent = lastMatches.profileKey === matchingProfileKey() ? lastMatches.jobs : [];
+  const byId = new Map(recent.map((job) => [job.id, job]));
+  for (const job of saved) byId.set(job.id, job);
+  return [...byId.values()];
+}
+
+function targetJobOptions(jobs) {
+  return '<option value="">اختر وظيفة من قائمتك</option>' + jobs.map(job =>
+    `<option value="${esc(job.id)}">${esc(job.title)} · ${esc(job.employer)}</option>`).join("");
+}
+
+const SEARCH_FIELDS = ["q", "city", "profession", "min_salary", "experience", "sector"];
+
+function defaultJobSearchMode() {
+  let previous = "";
+  try { previous = sessionStorage.getItem("jobs.search-tab." + (state.session?.user?.sub || "guest")); } catch {}
+  if (previous === "saved" || previous === "browse") return previous;
+  return state.session?.authenticated && matchingReady() ? "matches" : "browse";
+}
+
+function searchParamsFromUrl(query = location.search) {
+  const params = new URLSearchParams(query);
+  const mode = ["browse", "matches", "saved"].includes(params.get("view")) ? params.get("view") : defaultJobSearchMode();
+  const offset = Number(params.get("offset"));
+  const filters = Object.fromEntries(SEARCH_FIELDS.filter((field) => params.get(field)?.trim())
+    .map((field) => [field, params.get(field).trim()]));
+  return { mode, filters, offset: Number.isSafeInteger(offset) && offset > 0 ? offset : 0, asOf: params.get("as_of") || "" };
+}
+
+function searchUrl(mode, filters = {}, offset = 0, asOf = "") {
+  const params = new URLSearchParams();
+  params.set("view", mode);
+  for (const key of SEARCH_FIELDS) if (filters[key]) params.set(key, filters[key]);
+  if (offset) params.set("offset", String(offset));
+  if (asOf) params.set("as_of", asOf);
+  return "/jobs?" + params.toString();
+}
+
+function searchModes(active) {
+  const en = state.locale === "en";
+  const labels = { browse: en ? "All vacancies" : "كل الوظائف", matches: en ? "Résumé matches" : "وظائف تناسب سيرتي", saved: en ? "Saved jobs" : "الوظائف المحفوظة" };
+  return `<nav class="section chips" aria-label="${en ? "Job search" : "بحث الوظائف"}">${Object.entries(labels).map(([mode, label]) =>
+    `<button class="chip ${active === mode ? "active" : ""}" data-nav="${searchUrl(mode)}" data-search-tab="${mode}" aria-pressed="${active === mode}">${label}</button>`).join("")}</nav>`;
+}
+
+function jobSearchForm(mode, filters, compact = false) {
+  const en = state.locale === "en";
+  const field = (key, label, type = "text") => `<label class="field">${label}<input type="${type}" name="${key}" value="${esc(filters[key] || "")}" ${type === "number" ? 'min="0" step="1"' : 'maxlength="180"'} /></label>`;
+  const expanded = ["profession", "min_salary", "experience", "sector"].some(key => filters[key]);
+  return `<form class="form vacancy-search" data-vacancy-filters="${mode}">
+    <div class="vacancy-search-fields">${field("q", en ? "Job title, keyword or employer" : "المسمى أو الكلمة أو جهة العمل")}
+    ${field("city", en ? "City or location" : "المدينة أو الموقع")}</div>
+    ${compact ? "" : `<details class="vacancy-filters" ${expanded ? "open" : ""}><summary>${en ? "More filters" : "مرشحات إضافية"}</summary>
+      <div class="vacancy-search-fields">${field("profession", en ? "Profession" : "المهنة")}
+      ${field("min_salary", en ? "Minimum monthly salary (SAR)" : "الحد الأدنى للراتب الشهري (ر.س)", "number")}
+      ${field("experience", en ? "Years of experience" : "سنوات الخبرة", "number")}
+      <label class="field">${en ? "Sector" : "القطاع"}<select name="sector"><option value="">${en ? "All sectors" : "جميع القطاعات"}</option><option value="government" ${filters.sector === "government" ? "selected" : ""}>${en ? "Saudi government" : "حكومي سعودي"}</option></select></label></div></details>`}
+    <div class="row"><button class="btn primary" type="submit">${iconSearch()} ${en ? "Search jobs" : "بحث عن وظائف"}</button>
+    ${Object.keys(filters).length ? `<button class="btn outline" type="button" data-nav="${searchUrl(mode)}">${en ? "Clear filters" : "مسح المرشحات"}</button>` : ""}</div>
+  </form>`;
+}
+
+const PAGE_SIZE = 20;
+
+async function fetchJobPage(page, filters, offset, asOf, profile) {
+  try {
+    const params = { ...filters, limit: String(PAGE_SIZE), offset: String(offset) };
+    if (asOf) params.as_of = asOf;
+    const result = page.mode === "matches"
+      ? await apiJson("/api/jobs/match", { method: "POST", body: JSON.stringify({ profile, filters, offset, limit: PAGE_SIZE, as_of: asOf }) })
+      : await apiJson("/api/jobs/search?" + new URLSearchParams(params));
+    if (!Array.isArray(result.jobs) || !Number.isFinite(result.total) || result.total < 0) throw new Error("Invalid job results");
+    if (searchPage !== page) return;
+    page.jobs = result.jobs.map(importLiveMatchedJob);
+    page.total = result.total;
+    page.asOf = result.as_of || asOf;
+    page.next = Number.isSafeInteger(result.next_offset) && result.next_offset > offset ? result.next_offset : null;
+    if (page.mode === "matches") {
+      lastMatches = { profileKey: page.profileKey, jobs: page.jobs };
+      refreshTargetChoices();
+      const account = state.session?.user?.sub;
+      if (account && matchingProfileKey() === page.profileKey) {
+        try { sessionStorage.setItem("jobs.match-search." + account, searchUrl("matches", filters, offset)); } catch {}
+      }
+    }
+  } catch (error) {
+    if (searchPage !== page) return;
+    page.error = error.code || "SEARCH_UNAVAILABLE";
+  }
+  page.pending = false;
+  if (routeOf().name === "jobs-list") render();
+}
+
+let restoredSearchProfile = "";
+
+async function restoreRecentMatches() {
+  const account = state.session?.user?.sub;
+  if (!account || !matchingReady()) return;
+  const profileKey = matchingProfileKey();
+  if (lastMatches.profileKey === profileKey || restoredSearchProfile === profileKey) return;
+  restoredSearchProfile = profileKey;
+  try {
+    const saved = sessionStorage.getItem("jobs.match-search." + account);
+    if (!saved) return;
+    const { filters, offset } = searchParamsFromUrl(new URL(saved, location.origin).search);
+    const previous = lastMatches;
+    const result = await apiJson("/api/jobs/match", { method: "POST",
+      body: JSON.stringify({ profile: approvedMatchingProfile(), filters, offset, limit: PAGE_SIZE }) });
+    if (matchingProfileKey() !== profileKey || lastMatches !== previous || !Array.isArray(result.jobs)) return;
+    lastMatches = { profileKey, jobs: result.jobs.map(importLiveMatchedJob) };
+    refreshTargetChoices();
+  } catch { /* Saved jobs and manual search remain available. */ }
+}
+
+function refreshTargetChoices() {
+  const selector = document.querySelector("#coach-target-job");
+  if (selector) {
+    const current = selector.value;
+    const targets = targetJobs();
+    selector.innerHTML = targetJobOptions(targets);
+    if (targets.some(job => job.id === current)) selector.value = current;
+    selector.form.hidden = !targets.length;
+    document.querySelector("[data-find-coach-job]").hidden = Boolean(targets.length);
+  }
+}
+
+function publicJobCard(job, matched) {
+  const en = state.locale === "en";
+  const role = job.match_breakdown?.find(item => item.key === "role");
+  const evidence = role?.evidence?.length ? role.evidence[0] : job.match_evidence?.[0];
+  return `<article class="card job-search-card"><div class="section-head"><h2><a href="${esc(job.public_url)}">${esc(job.title)}</a></h2>
+    ${matched ? `<span class="tag teal">${esc(job.score)}% · ${en ? "match" : "تطابق"}</span>` : ""}</div>
+    <p>${esc([job.employer, job.location].filter(Boolean).join(" · "))}</p>
+    ${matched && evidence ? `<p class="muted tiny">${esc(evidence)}</p>` : ""}
+    ${matched && job.requirements_to_verify?.length ? `<p class="muted tiny">${en ? "Confirm" : "تحقق من المتطلب"} · ${esc(job.requirements_to_verify.join(", "))}</p>` : ""}
+    <div class="row"><a class="btn outline sm" href="${esc(job.public_url)}">${en ? "Vacancy details" : "تفاصيل الإعلان"}</a>
+    <button class="btn outline sm" data-open-search-job="${esc(job.public_id)}">${en ? "Save and tailor résumé" : "حفظ وتخصيص السيرة"}</button></div></article>`;
+}
+
 function renderJobsList() {
-  const visibleJobs = trackedAndMatchedJobs();
+  const { mode, filters, offset, asOf } = searchParamsFromUrl();
+  if (mode === "saved") return renderSavedJobs();
+  const en = state.locale === "en";
+  const matching = mode === "matches";
+  const profileKey = matching ? matchingProfileKey() : "";
+  let content;
+  if (matching && (!state.session?.authenticated || !matchingReady())) {
+    const guest = !state.session?.authenticated;
+    content = `<div class="empty"><p>${guest ? (en ? "Sign in to search with your résumé." : "سجّل الدخول للبحث باستخدام سيرتك.") : (en ? "Upload or paste your résumé to find matching vacancies." : "ارفع سيرتك أو الصقها للبحث عن وظائف تناسب خبراتك.")}</p>
+      <button class="btn primary" data-nav="${guest ? "/login" : "/account"}">${guest ? (en ? "Sign in" : "تسجيل الدخول") : (en ? "Add résumé" : "إضافة السيرة")}</button></div>`;
+  } else {
+    const key = JSON.stringify([mode, filters, offset, asOf, profileKey]);
+    if (key !== searchPage.key) {
+      if (matching) lastMatches = { profileKey, jobs: [] };
+      searchPage = { key, mode, profileKey, pending: true, jobs: [] };
+      void fetchJobPage(searchPage, filters, offset, asOf, matching ? approvedMatchingProfile() : null);
+    }
+    const page = searchPage;
+    if (page.pending) content = `<p role="status" class="empty">${en ? "Searching vacancies…" : "جاري البحث عن الوظائف…"}</p>`;
+    else if (page.error) {
+      const profileNeeded = ["PROFILE_REQUIRED", "RESUME_REQUIRED"].includes(page.error);
+      content = `<div role="alert" class="empty"><p>${profileNeeded ? (en ? "Add a target role in your profile so we can match your résumé." : "أضف مسمى مستهدفاً في ملفك لتحديد الوظائف المناسبة.") : (en ? "Job search is temporarily unavailable." : "تعذّر الاتصال بخدمة البحث عن الوظائف.")}</p>
+        <button class="btn outline" ${profileNeeded ? 'data-nav="/account"' : "data-retry-job-search"}>${profileNeeded ? (en ? "Edit profile" : "تعديل الملف") : (en ? "Try again" : "إعادة المحاولة")}</button></div>`;
+    } else {
+      const count = page.jobs.length;
+      content = count ? `<p class="muted tiny" role="status">${en ? "Showing" : "عرض"} ${offset + 1}–${offset + count} ${en ? "of" : "من"} ${page.total}</p><div class="list">${page.jobs.map(job => publicJobCard(job, matching)).join("")}</div>`
+        : `<p class="empty" role="status">${matching ? (en ? "No verified vacancies match this résumé and these filters." : "لا توجد شواغر موثقة تطابق سيرتك والمرشحات الحالية.") : (en ? "No vacancies match these filters." : "لا توجد شواغر تطابق هذه المرشحات.")}</p>`;
+      const paging = (cursor, label) => `<button class="btn outline" data-nav="${esc(searchUrl(mode, filters, cursor, page.asOf))}">${label}</button>`;
+      content += `<nav class="row vacancy-paging">${offset ? paging(Math.max(0, offset - PAGE_SIZE), en ? "Previous" : "السابق") : ""}${page.next !== null ? paging(page.next, en ? "Next" : "التالي") : ""}</nav>`;
+    }
+  }
+  shell(`${banner()}<header class="section"><h1>${matching ? (en ? "Résumé matches" : "وظائف تناسب سيرتي") : (en ? "Find a job" : "البحث عن وظيفة")}</h1></header>
+    ${searchModes(mode)}<section class="section">${jobSearchForm(mode, filters)}</section><section class="section">${content}</section>`, { screen: "jobs-list" });
+}
+
+
+function renderSavedJobs() {
+  const visibleJobs = workspaceJobs();
   const counts = countByStatus(visibleJobs);
   const jobs = filteredJobs();
   const total = visibleJobs.length;
-  const matched = visibleJobs.filter((j) => Number(j.relevance_score || j.score || 0) >= 80).length;
+  const matched = visibleJobs.filter((j) => j.match_eligible).length;
   const ready = counts.ready || 0;
   const follow = counts.in_progress || 0;
   const processing = counts.processing || 0;
@@ -1562,7 +1605,7 @@ function renderJobsList() {
 
   const tabs = [
     { id: "all", label: `الكل ${total}` },
-    { id: "matched", label: `الكلية ${matched}` },
+    { id: "matched", label: `مطابقة للسيرة ${matched}` },
     { id: "processing", label: `قيد المعالجة ${processing}` },
     { id: "ready", label: `جاهزة للإرسال ${ready}` },
     { id: "in_progress", label: `متابعاتي ${follow}` },
@@ -1573,11 +1616,8 @@ function renderJobsList() {
     )
     .join("");
 
-  const listHtml = jobs.length
-    ? jobs.map(jobCardHtml).join("")
-    : onboardingReady()
-      ? `<div class="empty"><p>لا توجد وظائف مطابقة الآن.</p><button class="btn primary" data-search-approved-jobs>${iconSearch()} بحث ذكي عن وظائف مناسبة للسيرة</button></div>`
-      : `<div class="empty"><p>ارفع السيرة واعتمدها أولاً حتى نعرض الوظائف المناسبة فقط.</p><button class="btn primary" data-nav="/account">${iconDoc()} إضافة السيرة</button></div>`;
+  const listHtml = jobs.length ? jobs.map(jobCardHtml).join("")
+    : `<p class="empty">${state.locale === "en" ? "No saved jobs match these filters." : "لا توجد وظائف محفوظة بهذه المرشحات."}</p>`;
 
   const bulk = selectedCount
     ? `<div class="bulk-bar"><strong>${selectedCount} وظائف محددة</strong><span>نقلها إلى:</span>
@@ -1592,14 +1632,15 @@ function renderJobsList() {
 
   shell(
     `${banner()}
+    ${searchModes("saved")}
     <header class="section" style="padding-top:14px">
       <div class="row" style="justify-content:space-between">
         <div>
-          <h1 style="font-size:20px;font-weight:800;color:var(--ink)">الوظائف المناسبة (${total})</h1>
-          <p class="muted tiny" style="margin-top:2px">الفرص المطابقة للسيرة المعتمدة والوظائف المحفوظة من الروابط</p>
+          <h1 style="font-size:20px;font-weight:800;color:var(--ink)">${state.locale === "en" ? "Saved jobs" : "الوظائف المحفوظة"} (${total})</h1>
+
         </div>
         <div class="row">
-          ${onboardingReady()
+          ${matchingReady()
             ? `<button class="btn primary sm" data-search-approved-jobs>${iconSearch()} ابحث عن وظائف</button>`
             : `<button class="btn primary sm" data-nav="/account">${iconDoc()} أضف السيرة</button>`}
           <button class="btn outline sm" data-nav="/settings">${iconPlus()} المصادر</button>
@@ -1643,15 +1684,15 @@ function jobCardHtml(job) {
   const displayScore = Number(job.relevance_score || job.score || 0);
   const tone = displayScore >= 80 ? "" : displayScore >= 60 ? "gold" : "danger";
   const selected = state.selectedJobs.includes(job.id);
-  const ready = onboardingReady();
-  const evaluationScore = job.imported && !job.match_breakdown?.length ? "—" : `${job.score}%`;
-  const isExample = job.data_quality === "example" || job.source_quality === "example" || String(job.id || "").startsWith("demo-");
+  const ready = matchingReady();
+  const evaluationScore = job.match_breakdown?.length ? `${job.score}%` : "—";
+
   return `<article class="card job-card ${selected ? "selected" : ""}" data-job="${esc(job.id)}">
-    <div class="score-ring ${ready ? tone : "locked"}" style="--score:${ready ? displayScore : 0}"><span>${ready ? job.imported ? evaluationScore : `${displayScore}%` : "Profile"}</span></div>
+    <div class="score-ring ${ready ? tone : "locked"}" style="--score:${ready ? displayScore : 0}"><span>${ready ? evaluationScore : "—"}</span></div>
     <div class="body">
       <div class="row1">
         <span class="src"><span class="dot"></span>${esc(sourceLabel(job.source))}</span>
-        <span class="age">منذ ${esc(job.deadline && job.deadline !== "TBD" ? job.deadline : "اليوم")}</span>
+        ${job.posted_at ? `<span class="age">${esc(job.posted_at.slice(0, 10))}</span>` : ""}
       </div>
       <h3>${esc(job.title)}</h3>
       <div class="meta">
@@ -1662,9 +1703,9 @@ function jobCardHtml(job) {
         <span>${esc(STATUS_LABELS[job.status] || job.status)}</span>
       </div>
       <div class="tags">
-        <span class="tag teal">دوام كامل</span>
+        ${job.employment_type ? `<span class="tag teal">${esc(job.employment_type)}</span>` : ""}
         <span class="tag gold">${esc(sourceLabel(job.source))}</span>
-        ${isExample ? `<span class="tag outline">Example data</span>` : `<span class="tag teal">Live verified</span>`}
+        ${job.verification_status === "live" ? `<span class="tag teal">${state.locale === "en" ? "Verified at source" : "تم التحقق من المصدر"}</span>` : ""}
         ${job.status === "expired" ? `<span class="tag danger">منتهية</span>` : ""}
         ${displayScore >= 90 ? `<span class="tag outline">مطابقة عالية</span>` : ""}
       </div>
@@ -1676,7 +1717,7 @@ function jobCardHtml(job) {
 function renderJobDetail(id) {
   const job = jobById(id);
   if (!job) {
-    return renderJobsList();
+    return shell(`<div class="section empty"><p>${state.locale === "en" ? "This job is unavailable in your workspace." : "هذه الوظيفة غير متاحة في قائمتك."}</p><button class="btn primary" data-nav="/jobs">${esc(tr("searchJobs"))}</button></div>`, { screen: "job-detail" });
   }
   const tone = job.score >= 80 ? "" : job.score >= 60 ? "gold" : "danger";
   const related = sameSourceJobs(job, 3);
@@ -1684,17 +1725,17 @@ function renderJobDetail(id) {
   const draft = draftFor(job.id);
   const ghostwriter = ghostwriterFor(job.id);
   const tab = state.assistantTab || "overview";
-  const ready = onboardingReady();
-  const evaluationScore = job.imported && !job.match_breakdown?.length ? "—" : `${job.score}%`;
+  const ready = matchingReady();
+  const evaluationScore = job.match_breakdown?.length ? `${job.score}%` : "—";
 
   const overview = `<div class="tab-panel">
     <div class="section-block">
       <h3>ملخص الوظيفة</h3>
       <p class="lede">${esc(job.description)}</p>
       <div class="tags">
-        <span class="tag teal">دوام كامل</span>
+        ${job.employment_type ? `<span class="tag teal">${esc(job.employment_type)}</span>` : ""}
         <span class="tag gold">${esc(sourceLabel(job.source))}</span>
-        <span class="tag outline">منذ ${esc(job.deadline || "اليوم")}</span>
+        ${job.posted_at ? `<span class="tag outline">${esc(job.posted_at.slice(0, 10))}</span>` : ""}
       </div>
     </div>
     <div class="section-block">
@@ -1775,8 +1816,8 @@ function renderJobDetail(id) {
         <h1>${esc(job.title)}</h1>
         <div class="company">${esc(job.employer)}</div>
         <div class="meta">
-          <span class="tag teal">دوام كامل</span>
-          <span class="tag outline">منذ ${esc(job.deadline || "اليوم")}</span>
+          ${job.employment_type ? `<span class="tag teal">${esc(job.employment_type)}</span>` : ""}
+          ${job.posted_at ? `<span class="tag outline">${esc(job.posted_at.slice(0, 10))}</span>` : ""}
           <span class="tag gold">${esc(sourceLabel(job.source))}</span>
         </div>
       </div>
@@ -1816,7 +1857,9 @@ function buildSkillRows(job) {
     }).join("");
   const evidence = Array.isArray(job.match_evidence) ? job.match_evidence.join(", ") : "";
   const gaps = Array.isArray(job.missing_requirements) ? job.missing_requirements.join(", ") : "";
+  const toVerify = Array.isArray(job.requirements_to_verify) ? job.requirements_to_verify.join(", ") : "";
   return rows + (evidence ? `<p class="muted tiny">${english ? "Matched evidence" : "الأدلة المطابقة"} · ${esc(evidence)}</p>` : "")
+    + (toVerify ? `<p class="muted tiny">${english ? "Confirm from the posting" : "متطلبات للتحقق من الإعلان"} · ${esc(toVerify)}</p>` : "")
     + (gaps ? `<p class="muted tiny">${english ? "Gaps" : "الفجوات"} · ${esc(gaps)}</p>` : "");
 }
 
@@ -2210,6 +2253,7 @@ function renderOnboarding() {
 }
 
 function renderAccount() {
+  void restoreRecentMatches();
   const p = state.profile || {};
   const initials = (p.display_name || "ض").trim().slice(0, 1);
   const completeness = profileCompleteness(p);
@@ -2413,18 +2457,18 @@ function renderResumeCoach() {
         <div class="row profile-actions">
           <button class="btn primary" data-resume-coach ${ready && signedIn && !pending ? "" : "disabled"}>${iconSpark()} ${pending ? "جاري تحسين السيرة…" : "تحسين السيرة الكاملة باستخدام DeepSeek"}</button>
           <button class="btn ${approved ? "outline" : "primary"}" data-approve-master-resume ${coach ? "" : "disabled"}>${iconCheck()} <span>${approved ? "السيرة معتمدة" : "اعتماد السيرة المحسنة"}</span></button>
-          <button class="btn outline" data-search-approved-jobs ${approved ? "" : "disabled"}>${iconBolt()} البحث عن وظائف مناسبة</button>
+          <button class="btn outline" data-search-approved-jobs>${iconBolt()} البحث عن وظائف مناسبة</button>
         </div>
-        ${state.jobs.length ? `<form class="form" data-coach-target>
+        <form class="form" data-coach-target ${targetJobs().length ? "" : "hidden"}>
           <div class="field">
             <label for="coach-target-job">الوظيفة المستهدفة</label>
             <select id="coach-target-job" name="job" required>
-              <option value="">اختر وظيفة من قائمتك</option>
-              ${state.jobs.map((job) => `<option value="${esc(job.id)}">${esc(job.title)} · ${esc(job.employer)}</option>`).join("")}
+              ${targetJobOptions(targetJobs())}
             </select>
           </div>
           <button class="btn outline" type="submit" ${ready && signedIn && !state.jobWriterPending ? "" : "disabled"}>${iconSpark()} إنشاء سيرة لهذه الوظيفة باستخدام DeepSeek</button>
-        </form>` : `<button class="btn outline" data-nav="/jobs">اختيار وظيفة لتخصيص السيرة</button>`}
+        </form>
+        <button class="btn outline" data-find-coach-job data-nav="/jobs" ${targetJobs().length ? "hidden" : ""}>اختيار وظيفة لتخصيص السيرة</button>
       </div>
     </section>`;
 }
@@ -2482,14 +2526,14 @@ function renderLegal(page) {
 /* ---------------- Results ---------------- */
 function renderResults() {
   const counts = countByStatus();
-  const total = state.jobs.length;
+  const total = workspaceJobs().length;
   const applied = counts.applied || 0;
   const ready = counts.ready || 0;
   const follow = counts.in_progress || 0;
   const processing = counts.processing || 0;
-  const matched = state.jobs.filter((j) => j.score >= 80).length;
+  const matched = workspaceJobs().filter((j) => j.match_eligible).length;
   const responseRate = pct(applied, ready + applied + follow + processing);
-  const followUpQueue = state.jobs
+  const followUpQueue = workspaceJobs()
     .filter((job) => applicationTracking(job).follow_up_at)
     .sort((a, b) => applicationTracking(a).follow_up_at.localeCompare(applicationTracking(b).follow_up_at));
 
@@ -2509,7 +2553,7 @@ function renderResults() {
     <section class="section">
       <div class="card results-card">
         <h3 style="font-size:13px;font-weight:800">الاتجاه الأسبوعي</h3>
-        ${buildTrendSvg(state.jobs)}
+        ${buildTrendSvg(workspaceJobs())}
       </div>
     </section>
     <section class="section">
@@ -2540,7 +2584,7 @@ function renderResults() {
     <section class="section">
       <div class="section-block">
         <h3>أحدث النشاطات</h3>
-        ${(state.activity_feed || []).slice(0, 6).map(activityHtml).join("") || `<p class="muted tiny">لا توجد نشاطات بعد.</p>`}
+        ${(state.activity_feed || []).filter(item => jobById(item.job_id)).slice(0, 6).map(activityHtml).join("") || `<p class="muted tiny">لا توجد نشاطات بعد.</p>`}
       </div>
     </section>`,
     { screen: "results" },
@@ -2634,6 +2678,9 @@ function setupEvents() {
   document.querySelectorAll("[data-nav]").forEach((item) => {
     item.addEventListener("click", (e) => {
       e.preventDefault();
+      if (item.dataset.searchTab) {
+        try { sessionStorage.setItem("jobs.search-tab." + (state.session?.user?.sub || "guest"), item.dataset.searchTab); } catch {}
+      }
       navigate(item.dataset.nav);
     });
   });
@@ -2645,13 +2692,34 @@ function setupEvents() {
     });
   });
 
-  const search = document.querySelector("[data-search]");
-  if (search) {
-    search.addEventListener("input", (e) => {
-      state.query = e.target.value;
-      render();
+  document.querySelectorAll("[data-vacancy-filters]").forEach((form) => {
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      const filters = Object.fromEntries([...new FormData(form)].map(([key, value]) => [key, String(value).trim()]));
+      searchPage.key = "";
+      navigate(searchUrl(form.dataset.vacancyFilters, filters));
     });
-  }
+  });
+  document.querySelector("[data-retry-job-search]")?.addEventListener("click", () => {
+    searchPage.key = "";
+    render();
+  });
+  document.querySelectorAll("[data-open-search-job]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const list = routeOf().name === "jobs-list" ? searchPage.jobs : lastMatches.jobs;
+      const result = list.find((job) => job.public_id === button.dataset.openSearchJob);
+      if (!result) return;
+      if (!state.session?.authenticated) return navigate("/login");
+      const existing = workspaceJobs().find((job) => job.id === result.id || job.public_id === result.public_id
+        || (job.source_url && (job.source_url === result.source_url || job.source_url === location.origin + result.public_url)));
+      if (!existing) {
+        replaceJob(result);
+        saveWorkspaceState();
+      }
+      state.assistantTab = "resume";
+      navigate("/jobs/" + encodeURIComponent((existing || result).id));
+    });
+  });
 
   const localeToggle = document.querySelector("[data-toggle-locale]");
   if (localeToggle) {
@@ -2670,19 +2738,6 @@ function setupEvents() {
       render();
     });
   }
-
-  document.querySelectorAll("[data-region]").forEach((item) => {
-    item.addEventListener("click", () => {
-      state.region = item.dataset.region;
-      render();
-    });
-  });
-
-  document.querySelectorAll("[data-source-filter]").forEach((item) => {
-    item.addEventListener("click", () => {
-      navigate("/jobs");
-    });
-  });
 
   document.querySelectorAll("[data-job-filter]").forEach((item) => {
     item.addEventListener("click", () => {
@@ -2866,8 +2921,8 @@ function setupEvents() {
       const result = await runAction("evaluate-job", "جاري التقييم...", "تم تقييم الملاءمة", () =>
         apiJson("/api/jobs/evaluate", { method: "POST", body: JSON.stringify({ job, profile: approvedMatchingProfile() }) }));
       if (result) {
-        const { score, match_breakdown, match_eligible, fit_grade, match_evidence, missing_requirements, match_confidence, fit_explanation } = result;
-        replaceJob({ ...job, score, match_breakdown, match_eligible, fit_grade, match_evidence, missing_requirements, match_confidence, fit_explanation });
+        const { score, match_breakdown, match_eligible, fit_grade, match_evidence, missing_requirements, requirements_to_verify, match_confidence, fit_explanation } = result;
+        replaceJob({ ...job, score, match_breakdown, match_eligible, fit_grade, match_evidence, missing_requirements, requirements_to_verify, match_confidence, fit_explanation });
         saveWorkspaceState();
       }
       render();
@@ -3031,7 +3086,13 @@ function setupEvents() {
   document.querySelector("[data-coach-target]")?.addEventListener("submit", (event) => {
     event.preventDefault();
     const jobId = new FormData(event.currentTarget).get("job");
-    if (!jobById(jobId) || state.jobWriterPending) return;
+    if (state.jobWriterPending) return;
+    const target = targetJobs().find((job) => job.id === jobId);
+    if (!target) return;
+    if (!jobById(jobId)) {
+      replaceJob(target);
+      persistWorkState();
+    }
     state.assistantTab = "resume";
     navigate(`/jobs/${encodeURIComponent(jobId)}`);
     generateJobKit(jobId, "deepseek");
@@ -3279,10 +3340,10 @@ function setupEvents() {
       const locations = Array.isArray(searchProfile.locations) ? searchProfile.locations.join(", ") : "";
       state.profile = {
         ...(state.profile || {}),
-        target_roles: targetTitles || state.profile.target_roles,
-        target_locations: locations || state.profile.target_locations,
-        resume_skills: keywords || state.profile.resume_skills,
-        resume_seniority: searchProfile.seniority || state.profile.resume_seniority,
+        target_roles: state.profile.target_roles || targetTitles,
+        target_locations: state.profile.target_locations || locations,
+        resume_skills: state.profile.resume_skills || keywords,
+        resume_seniority: state.profile.resume_seniority || searchProfile.seniority,
       };
       state.masterResume = {
         ar: coach.ar_master_resume || "",
@@ -3310,43 +3371,8 @@ function setupEvents() {
     });
   });
 
-  document.querySelectorAll("[data-search-approved-jobs]").forEach((searchApprovedJobs) => {
-    searchApprovedJobs.addEventListener("click", async () => {
-      if (!masterResumeReady()) {
-        state.action = { pending: "", message: "", error: "ارفع السيرة واعتمدها أولاً، ثم ابحث عن الوظائف المناسبة." };
-        render();
-        return;
-      }
-      const result = await runAction(
-        "live-match",
-        "جاري البحث عن وظائف مناسبة للسيرة المعتمدة...",
-        "تم البحث عن وظائف مناسبة",
-        () =>
-          apiJson("/api/jobs/match", {
-            method: "POST",
-            body: JSON.stringify({ profile: approvedMatchingProfile(), limit: 40 }),
-          }),
-      );
-      const jobs = Array.isArray(result?.jobs) ? result.jobs.map(importLiveMatchedJob) : [];
-      const imported = jobs;
-      if (imported.length) {
-        const existing = new Map(state.jobs.map((job) => [job.id, job]));
-        for (const job of imported) existing.set(job.id, { ...(existing.get(job.id) || {}), ...job });
-        state.jobs = [...existing.values()].sort((a, b) => Number(b.score || 0) - Number(a.score || 0));
-        saveWorkspaceState();
-        state.action = {
-          pending: "",
-          message: jobs.length
-            ? `تم جلب ${jobs.length} وظائف مناسبة للسيرة المعتمدة.`
-            : "لم ترجع المصادر الحية نتائج كافية، لذلك جهزنا قائمة مراجعة مبنية على السيرة لتبدأ منها.",
-          error: "",
-        };
-        navigate("/jobs");
-        return;
-      }
-      state.action = { pending: "", message: "", error: "لم نجد وظائف مناسبة بما يكفي الآن. جرّب البحث مرة أخرى أو أضف مصدر وظائف من صفحة المصادر." };
-      render();
-    });
+  document.querySelectorAll("[data-search-approved-jobs]").forEach((button) => {
+    button.addEventListener("click", () => navigate("/jobs?view=matches"));
   });
 
   const logout = document.querySelector("[data-auth-logout]");
@@ -3437,7 +3463,7 @@ function setupEvents() {
           const approve = coach.querySelector("[data-approve-master-resume]");
           approve.disabled = true;
           approve.querySelector("span").textContent = "اعتماد السيرة المحسنة";
-          coach.querySelector("[data-search-approved-jobs]").disabled = true;
+
           const targetButton = coach.querySelector("[data-coach-target] button");
           if (targetButton) targetButton.disabled = !ready || !state.session?.authenticated || state.jobWriterPending;
           coach.querySelector("[data-resume-coach]").disabled = !ready || !state.session?.authenticated || state.resumeCoachPending;
@@ -3540,11 +3566,11 @@ function setupEvents() {
       state.masterResume = { ar: "", en: "", approved_at: new Date().toISOString() };
       Object.keys(state.ghostwriter).forEach((jobId) => invalidateApplicationReview(jobId));
       state.approvedMasterResume = true;
-      state.action = { pending: "", message: "تم اعتماد السيرة. سنعرض الآن الوظائف الأقرب لها فقط.", error: "" };
+      state.action = { pending: "", message: "تم اعتماد السيرة الأصلية.", error: "" };
       saveLocalProfile(state.profile);
       saveLocalAiWriterState();
       saveWorkspaceState();
-      navigate("/jobs");
+      navigate("/jobs?view=matches");
     });
   }
 
@@ -3610,23 +3636,6 @@ function setupEvents() {
       const id = item.dataset.scanSource;
       if (!state.session?.authenticated) {
         state.action = { pending: "", message: "", error: "Sign in before scanning a source." };
-        render();
-        return;
-        const source = (state.sources || []).find((s) => s.id === id);
-        if (!source) return;
-        const jobs = fallbackMatchedJobsFromProfile().map((job, index) => ({
-          ...job,
-          id: `scan-${id}-${Date.now().toString(36)}-${index + 1}`,
-          source: id,
-          source_url: source.url,
-          employer: source.label,
-        }));
-        source.last_scanned_at = new Date().toISOString();
-        source.job_count = (source.job_count || 0) + jobs.length;
-        state.jobs = [...jobs, ...(state.jobs || [])];
-        state.scanResult = { source, jobs, mode: "local-resume-scan" };
-        persistWorkState();
-        state.action = { pending: "", message: `أضيفت ${jobs.length} وظائف من المصدر محلياً`, error: "" };
         render();
         return;
       }

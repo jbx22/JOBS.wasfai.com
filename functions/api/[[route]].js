@@ -1,7 +1,8 @@
-import { getPublicJob, matchPublicJobs, plainDescription } from "./_public_jobs.js";
+import { getPublicJob, matchPublicJobs, plainDescription, searchPublicJobs } from "./_public_jobs.js";
 import { matchJob, normalizeProfile } from "../../workers/ingestion/src/index.js";
 import { EMPLOYER_BOARDS, presentCentralSource, SOURCE_CONNECTORS } from "../../workers/ingestion/src/boards.js";
 import {
+  getAuthenticatedUser,
   json,
   noContent,
   requireAuthenticatedState,
@@ -10,6 +11,7 @@ import {
   writeUserState,
 } from "./_state.js";
 import { getJobDb } from "./_db.js";
+import { AuthError } from "./auth/_auth.js";
 import { validateKit } from "./ghostwriter.js";
 
 export async function onRequest(context) {
@@ -20,7 +22,11 @@ export async function onRequest(context) {
   const parts = url.pathname.replace(/^\/api\/?/, "").split("/").filter(Boolean);
 
   try {
-    if (method === "POST" && parts[0] === "jobs" && parts[1] === "match") return await jobsMatch(context);
+    if (method === "GET" && parts.length === 2 && parts[0] === "jobs" && parts[1] === "search") {
+      const params = Object.fromEntries(url.searchParams);
+      return await jobSearchResponse(() => searchPublicJobs(context.env, params, params));
+    }
+    if (method === "POST" && parts.length === 2 && parts[0] === "jobs" && parts[1] === "match") return await jobsMatch(context);
     if (method === "POST" && parts.length === 2 && parts[0] === "jobs" && parts[1] === "evaluate") return await evaluateJob(context);
     if (method === "POST" && parts.length === 2 && parts[0] === "jobs" && parts[1] === "import") return await importJob(context);
     if (method === "PATCH" && parts[0] === "jobs" && parts[1] === "bulk-status") return await bulkStatus(context);
@@ -71,15 +77,29 @@ async function readBody(context) {
   }
 }
 
-async function jobsMatch(context) {
-  const body = await readBody(context);
-  const access = await requireAuthenticatedState(context);
-  if (access.error) return access.error;
+async function jobSearchResponse(search) {
   try {
-    return json(await matchPublicJobs(context.env, body.profile || {}, body.limit));
-  } catch {
-    return json({ ok: false, jobs: [], matched: 0, error: "Job matching is temporarily unavailable.", code: "MATCH_UNAVAILABLE" }, 503);
+    return json(await search());
+  } catch (error) {
+    if (error instanceof AuthError) return json({ ok: false, error: error.message, code: error.code }, error.status);
+    console.error("Job search unavailable", { name: error?.name, code: error?.code });
+    return json({ ok: false, error: "Job search is temporarily unavailable.", code: "SEARCH_UNAVAILABLE" }, 503);
   }
+}
+
+async function jobsMatch(context) {
+  return jobSearchResponse(async () => {
+    if (!await getAuthenticatedUser(context)) throw new AuthError("AUTH_REQUIRED", 401, "Sign in to find matching jobs.");
+    let body;
+    try { body = await context.request.json(); } catch { /* Invalid input is handled below. */ }
+    if (!body || typeof body.profile !== "object" || !body.profile || Array.isArray(body.profile)) {
+      throw new AuthError("INVALID_INPUT", 400, "A matching profile is required.");
+    }
+    if (body.filters !== undefined && (!body.filters || typeof body.filters !== "object" || Array.isArray(body.filters))) {
+      throw new AuthError("INVALID_INPUT", 400, "Search filters must be an object.");
+    }
+    return matchPublicJobs(context.env, body.profile, body.limit, body);
+  });
 }
 
 async function evaluateJob(context) {

@@ -1,3 +1,4 @@
+import { isBroadRole, jobResponsibilities, normalizeMatchText, occupationalField, roleEvidence, skillFields } from "./occupations.js";
 import { getJobDb } from "./_db.js";
 import { ensureEmployerBoards, GOVERNMENT_BOARDS, GOVERNMENT_CONNECTOR, PORTAL_ONLY_BOARDS,
   presentCentralSource, SMARTRECRUITERS_BOARDS, SMARTRECRUITERS_CONNECTOR, SOURCE_CONNECTORS } from "./boards.js";
@@ -481,21 +482,80 @@ function isBlockedTitle(title) {
 const CITY_ALIASES = [
   ["riyadh", "الرياض"], ["jeddah", "جدة", "جده"], ["makkah", "mecca", "مكة"],
   ["madinah", "medina", "المدينة"], ["dammam", "الدمام"], ["khobar", "الخبر"],
+  ["jazan", "jizan", "جازان", "جيزان"], ["najran", "نجران"], ["hail", "ha’il", "ha'il", "حائل"],
+  ["tabuk", "تبوك"], ["yanbu", "ينبع"], ["jubail", "الجبيل"], ["abha", "أبها", "ابها"], ["taif", "الطائف"],
+  ["khamis mushait", "خميس مشيط"],
 ];
 
+const ASIR_CITIES = ["asir", "aseer", "عسير", "abha", "أبها", "ابها", "khamis mushait", "خميس مشيط"];
 export function cityAliases(value) {
-  return CITY_ALIASES.find((group) => group.includes(value)) || [value];
+  const input = normalizeMatchText(value).trim();
+  return [...CITY_ALIASES, ASIR_CITIES].find(group => group.some(name => normalizeMatchText(name) === input)) || [value];
 }
 
-const MATCH_ALIASES = [
-  ...CITY_ALIASES,
-  ["saudi arabia", "ksa", "السعودية", "riyadh", "jeddah", "dammam", "khobar", "makkah", "madinah", "الرياض", "جدة", "الدمام", "الخبر"],
-  ["gcc", "gulf", "الخليج", "saudi arabia", "united arab emirates", "qatar", "kuwait", "bahrain", "oman"],
-  ["mechanical engineer", "مهندس ميكانيكي", "مهندس ميكانيكا"],
-  ["project manager", "مدير مشروع", "مدير مشاريع", "مدير المشاريع"],
-  ["maintenance engineer", "مهندس صيانة"], ["accountant", "محاسب"],
-  ["data analyst", "محلل بيانات"], ["software engineer", "مهندس برمجيات"],
+const LOCATION_ALIASES = [
+  ...CITY_ALIASES, ASIR_CITIES,
+  ["saudi arabia", "ksa", "السعودية", "المملكة العربية السعودية", ...ASIR_CITIES, ...CITY_ALIASES.flat()],
+  ["gcc", "gulf", "الخليج", "saudi arabia", "السعودية", ...CITY_ALIASES.flat(), "united arab emirates", "qatar", "kuwait", "bahrain", "oman", "الإمارات", "قطر", "الكويت", "البحرين", "عمان"],
 ];
+
+const ROLE_ALIASES = [
+  ["mechanical engineer", "مهندس ميكانيكي", "مهندس ميكانيكا", "مهندسة ميكانيكية"],
+  ["project manager", "مدير مشروع", "مدير مشاريع", "مدير المشاريع"],
+  ["maintenance engineer", "مهندس صيانة"], ["accountant", "محاسب", "محاسبة"],
+  ["industrial engineer", "مهندس صناعي", "مهندسة صناعية"], ["industrial consultant", "مستشار صناعي", "استشاري صناعي"],
+  ["plant manager", "factory manager", "مدير مصنع", "مدير المصنع"],
+  ["project controls engineer", "مهندس ضبط المشاريع", "مهندس مراقبة المشاريع"],
+  ["financial analyst", "محلل مالي", "محللة مالية"], ["registered nurse", "ممرض مسجل", "ممرضة مسجلة"],
+  ["procurement specialist", "أخصائي مشتريات", "أخصائية مشتريات"], ["human resources specialist", "أخصائي موارد بشرية"],
+  ["operations manager", "مدير عمليات", "مدير العمليات"],
+  ["data analyst", "محلل بيانات"], ["software engineer", "software developer", "مهندس برمجيات", "مطور برمجيات"],
+];
+
+const SKILL_ALIASES = [
+  ["maintenance", "الصيانة", "صيانة"], ["commissioning", "التشغيل التجريبي", "تشغيل تجريبي"],
+  ["rotating equipment", "معدات دوارة", "المعدات الدوارة"], ["pumps", "مضخات", "المضخات"],
+  ["project controls", "ضبط المشاريع", "مراقبة المشاريع"], ["cost control", "ضبط التكاليف", "مراقبة التكاليف"],
+  ["risk management", "إدارة المخاطر"], ["project management", "إدارة المشاريع"],
+  ["quality control", "مراقبة الجودة", "ضبط الجودة"], ["budgeting", "إعداد الميزانية"],
+];
+
+function aliasLookup(groups) {
+  const aliases = new Map();
+  for (const group of groups) {
+    for (const term of group) {
+      const key = normalizeMatchText(term);
+      if (!aliases.has(key)) aliases.set(key, group);
+    }
+  }
+  return aliases;
+}
+
+const locationLookup = aliasLookup(LOCATION_ALIASES);
+const skillLookup = aliasLookup(SKILL_ALIASES);
+const roleLookup = aliasLookup(ROLE_ALIASES);
+
+export function roleSearchAliases(value) {
+  return [...(roleLookup.get(normalizeMatchText(value).trim()) || [])];
+}
+
+const roleModifiers = new Set(["senior", "principal", "certified", "expert", "اول", "اولي", "معتمد", "معتمدة", "خبير", "خبيرة"]);
+function prepareRole(term) {
+  const normalized = normalizeMatchText(term);
+  const spellings = [...(roleLookup.get(normalized) || [term])];
+  const core = normalized.split(/\s+/u).filter(word => !roleModifiers.has(word)).join(" ");
+  if (core !== normalized && occupationalField(core)) spellings.push(...(roleLookup.get(core) || [core]));
+  return { term, field: occupationalField(term), broad: isBroadRole(term), words: spellings.map(phraseWords) };
+}
+
+function phraseWords(term) {
+  return splitTerms(normalizeMatchText(term));
+}
+
+function preparePhrases(terms, lookup) {
+  return terms.map(term => ({ term, words: (lookup?.get(normalizeMatchText(term)) || [term]).map(phraseWords) }));
+}
+
 
 export function normalizeProfile(profile) {
   const terms = [
@@ -507,37 +567,55 @@ export function normalizeProfile(profile) {
     ...splitTerms(profile.resume_text).slice(0, 30),
   ].map((term) => term.toLowerCase()).filter((term, index, all) => term.length > 2 && all.indexOf(term) === index);
   const locations = splitPhrases(profile.target_locations || profile.resume_regions).map(lower);
+  const roles = splitPhrases(profile.target_roles).map(lower);
+  const skills = splitPhrases(profile.resume_skills).map(lower);
+  const roleCriteria = roles.map(prepareRole);
+  const targetFields = new Set(roleCriteria.map(role => role.field).filter(Boolean));
+  const seniority = splitPhrases(profile.resume_seniority).map(lower);
+  const sectors = splitPhrases(profile.target_sectors || profile.resume_sectors || profile.resume_work_examples).map(lower);
   return {
     terms,
-    roles: splitPhrases(profile.target_roles).map(lower),
-    skills: splitPhrases(profile.resume_skills).map(lower),
+    roles, skills, roleCriteria,
+    skillCriteria: preparePhrases(skills, skillLookup),
+    locationCriteria: preparePhrases(locations, locationLookup),
+    seniorityCriteria: preparePhrases(seniority),
+    sectorCriteria: preparePhrases(sectors),
+    targetFields: targetFields.size ? targetFields : skillFields(skills),
     locations,
-    seniority: splitPhrases(profile.resume_seniority).map(lower),
-    sectors: splitPhrases(profile.target_sectors || profile.resume_sectors || profile.resume_work_examples).map(lower),
+    seniority, sectors,
     allowRemote: /remote|عن بعد/i.test(`${profile.target_locations || ""} ${profile.resume_regions || ""}`),
   };
 }
 
 export function matchJob(job, profile) {
-  const haystack = `${job.title} ${job.employer} ${job.location} ${job.description}`.toLowerCase();
-  const title = String(job.title || "").toLowerCase();
+  const title = normalizeMatchText(job.title);
+  const description = normalizeMatchText(job.description);
   const location = String(job.location || "").toLowerCase();
   const titleWords = matchWords(title);
-  const descriptionWords = matchWords(haystack);
+  const descriptionWords = matchWords(title + " " + description);
   const locationWords = matchWords(location);
   const seniorityWords = matchWords(`${title} ${job.seniority || ""}`);
   const sectorWords = new Set([...descriptionWords, ...matchWords(job.sector)]);
-  const roleHits = profile.roles.filter((term) => matchWithAliases(titleWords, term));
-  const skillHits = profile.skills.filter((term) => phraseMatch(descriptionWords, term));
-  const locationHits = profile.locations.filter((term) => matchWithAliases(locationWords, term));
-  const seniorityHits = profile.seniority.filter((term) => phraseMatch(seniorityWords, term));
-  const sectorHits = profile.sectors.filter((term) => phraseMatch(sectorWords, term));
+  const skillHits = matchedPhrases(descriptionWords, profile.skillCriteria || preparePhrases(profile.skills, skillLookup));
+  const criteria = profile.roleCriteria || profile.roles.map(prepareRole);
+  const context = {
+    title, ...jobResponsibilities(title, description, skillHits),
+    targetFields: profile.targetFields || new Set(criteria.map(role => role.field).filter(Boolean)),
+  };
+  const roles = criteria.map(role => ({ term: role.term, match: roleEvidence(role, context, matchesWords(titleWords, role.words)) }))
+    .filter(role => role.match);
+  const roleHits = roles.map(role => role.term);
+  const directRole = roles.some(role => role.match === "direct");
+  const adjacentTitle = roles.some(role => role.match === "adjacent");
+  const locationHits = matchedPhrases(locationWords, profile.locationCriteria || preparePhrases(profile.locations, locationLookup));
+  const seniorityHits = matchedPhrases(seniorityWords, profile.seniorityCriteria || preparePhrases(profile.seniority));
+  const sectorHits = matchedPhrases(sectorWords, profile.sectorCriteria || preparePhrases(profile.sectors));
   const remoteCompatible = profile.allowRemote && /remote|anywhere|global|عن بعد/i.test(location);
   const hasRole = roleHits.length > 0;
   const hasLocation = !profile.locations.length || locationHits.length > 0 || remoteCompatible;
   const seniorityConflict = hasSeniorityConflict(title, profile.seniority);
   const dimensions = [
-    { key: "role", points: hasRole ? 36 : 0, maximum: 36, evidence: roleHits },
+    { key: "role", points: directRole ? 36 : hasRole ? 32 : 0, maximum: 36, evidence: roleHits },
     { key: "skills", points: Math.min(25, skillHits.length * 5), maximum: 25, evidence: skillHits },
     { key: "location", points: hasLocation ? 18 : 0, maximum: 18, evidence: remoteCompatible && !locationHits.length ? ["remote"] : locationHits },
     { key: "seniority", points: seniorityHits.length || !profile.seniority.length ? 10 : 0, maximum: 10, evidence: seniorityHits },
@@ -548,18 +626,23 @@ export function matchJob(job, profile) {
   score = Math.max(0, Math.min(100, score));
   const missing = [!hasRole && "target role", !hasLocation && "target location", seniorityConflict && "compatible seniority"].filter(Boolean);
   const evidence = [...roleHits, ...skillHits, ...locationHits, ...sectorHits].filter((x, i, all) => all.indexOf(x) === i).slice(0, 10);
-  const matchEligible = hasRole && hasLocation && !seniorityConflict && score >= 65;
+  // Title, location and a concrete transfer are already independent evidence. An unlisted
+  // seniority or industry requirement should lower the score while keeping that fit visible.
+  const matchEligible = hasRole && hasLocation && !seniorityConflict &&
+    (directRole || adjacentTitle || skillHits.length > 0);
+  const requirementsToVerify = [...String(job.title || "").matchAll(/\(([^()]{1,80}?(?:\bexp(?:erience)?\.?|خبرة)[^()]{0,40})\)/giu)].map(item => item[1].trim());
   return {
     ...job,
     score,
     match_breakdown: dimensions,
-    fit_grade: !hasRole || !hasLocation || seniorityConflict ? "F" : score >= 85 ? "A" : score >= 75 ? "B" : score >= 65 ? "C" : score >= 50 ? "D" : "F",
+    fit_grade: !hasRole || !hasLocation || seniorityConflict ? "F" : score >= 85 ? "A" : score >= 75 ? "B" : score >= 64 ? "C" : score >= 50 ? "D" : "F",
     match_eligible: matchEligible,
-    match_confidence: evidence.length >= 5 ? "high" : evidence.length >= 2 ? "medium" : "low",
+    match_confidence: !matchEligible ? "low" : evidence.length >= 5 ? "high" : evidence.length >= 2 ? "medium" : "low",
     match_evidence: evidence,
     missing_requirements: missing,
+    requirements_to_verify: requirementsToVerify,
     fit_explanation: matchEligible
-      ? `Evidence-backed match: ${evidence.join(", ")}.`
+      ? `Evidence-backed match: ${evidence.join(", ")}.${requirementsToVerify.length ? " Verify with the employer: " + requirementsToVerify.join(", ") + "." : ""}`
       : `Not recommended${missing.length ? `: missing ${missing.join(", ")}` : ""}.`,
   };
 }
@@ -571,17 +654,15 @@ function splitPhrases(value) {
 function lower(value) { return String(value || "").toLowerCase(); }
 
 function matchWords(text) {
-  return new Set(lower(text).match(/[a-z0-9\u0600-\u06ff+#]+(?:\.[a-z0-9]+)*/g) || []);
+  return new Set(normalizeMatchText(text).match(/[a-z0-9\u0600-\u06ff+#]+(?:\.[a-z0-9]+)*/g) || []);
 }
 
-function phraseMatch(words, phrase) {
-  const terms = splitTerms(phrase);
-  return terms.length > 0 && terms.every((term) => words.has(lower(term)));
+function matchesWords(words, spellings) {
+  return spellings.some(tokens => tokens.length > 0 && tokens.every(term => words.has(term)));
 }
 
-function matchWithAliases(text, phrase) {
-  const aliases = MATCH_ALIASES.find((group) => group.includes(phrase)) || [phrase];
-  return aliases.some((term) => phraseMatch(text, term));
+function matchedPhrases(words, criteria) {
+  return criteria.filter(item => matchesWords(words, item.words)).map(item => item.term);
 }
 
 function hasSeniorityConflict(title, desired) {

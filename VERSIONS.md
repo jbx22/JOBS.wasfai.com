@@ -4,6 +4,7 @@ Sequential snapshots of the project. Each version is a frozen copy of the source
 
 | Version | Date | Description |
 | --- | --- | --- |
+| jobs76 | 2026-11-23 19:22 | Add bilingual vacancy browsing and rank résumé matches using occupational evidence |
 | jobs75 | 2026-11-23 19:05 | Use a dedicated encrypted DeepSeek binding for résumé coaching and selected-job CV generation |
 | jobs74 | 2026-11-23 18:39 | Repair résumé extraction and generate complete, evidence-based DeepSeek résumés for the candidate or a selected job |
 | jobs73 | 2026-11-23 14:25 | Make workspace and payment updates transactional and improve PostgreSQL gateway reliability |

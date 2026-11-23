@@ -48,6 +48,7 @@ async function mockWorkspace(page, authenticated) {
       case "/api/bootstrap": return fulfill({ profile: { display_name: "Sam Example", resume_text: "" }, jobs: [job], sources: [] });
       case "/api/auth/session": return fulfill({ authenticated, user: authenticated ? { sub: "synthetic-user", name: "Sam Example", email: "sam@example.invalid" } : null });
       case "/api/ai-health": return fulfill({ ready: true, provider: "deepseek" });
+      case "/api/jobs/match": return fulfill({ ok: true, jobs: [], total: 0, next_offset: null, as_of: new Date().toISOString() });
       case "/api/sources": return fulfill({ sources: [] });
       case "/api/me/state":
         if (req.method() === "PUT") trace.stored = req.postDataJSON().state;
@@ -96,7 +97,8 @@ test("signed-in applicant uploads, tailors, retries the coach and recovers a sav
 
   await page.goto("/account");
   await page.locator("[data-approve-uploaded-resume]").click();
-  await expect(page).toHaveURL(/\/jobs$/);
+  await expect(page).toHaveURL(/\/jobs\?view=matches$/);
+  await expect(page.getByRole("status")).toContainText(/لا توجد شواغر موثقة|No verified vacancies/);
   await expect.poll(() => trace.stored.approvedMasterResume).toBe(true);
   expect(trace.stored.masterResume.en).toBe("");
   expect(trace.stored.masterResume.ar).toBe("");
