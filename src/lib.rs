@@ -887,15 +887,15 @@ async fn put_package(
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
 }
 
-async fn post_generate_package(
-    State(state): State<AppState>,
-    Path(job_id): Path<String>,
-) -> Result<Json<ApplicationPackage>, StatusCode> {
-    state
-        .store
-        .generate_application_package(&job_id)
-        .map(Json)
-        .map_err(|_| StatusCode::NOT_FOUND)
+async fn post_generate_package() -> (StatusCode, Json<serde_json::Value>) {
+    // Reviewed kits live in the signed-in Pages workspace, outside the renderer's prototype store.
+    (
+        StatusCode::CONFLICT,
+        Json(serde_json::json!({
+            "code": "QUALITY_REVIEW_REQUIRED",
+            "error": "Generate and approve the application in the Jobs workspace before exporting."
+        })),
+    )
 }
 
 async fn post_restore_package_version(

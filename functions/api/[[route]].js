@@ -10,6 +10,7 @@ import {
   writeUserState,
 } from "./_state.js";
 import { getJobDb } from "./_db.js";
+import { validateKit } from "./ghostwriter.js";
 
 export async function onRequest(context) {
   if (context.request.method === "OPTIONS") return noContent();
@@ -31,7 +32,7 @@ export async function onRequest(context) {
     if ((method === "POST" || method === "PUT" || method === "PATCH") && parts[0] === "sources" && parts[2] === "schedule") return await sourceSchedule(context, parts[1]);
     if (method === "POST" && parts[0] === "sources" && parts[2] === "scan") return await sourceScan(context, parts[1]);
     if (method === "POST" && parts[0] === "drafts") return await draftCreate(context);
-    if (method === "POST" && parts[0] === "packages" && parts[2] === "generate") return await packageGenerate(context, parts[1]);
+    if (method === "POST" && parts.length === 3 && parts[0] === "packages" && parts[2] === "generate") return await packageGenerate(context, parts[1]);
     if ((method === "POST" || method === "PUT" || method === "PATCH") && parts[0] === "profile") return await profileSave(context);
 
     return json({
@@ -379,15 +380,25 @@ async function packageGenerate(context, jobId) {
   return withState(context, async (state) => {
     const job = (state.jobs || []).find((item) => item.id === jobId);
     if (!job) return json({ error: "Job not found.", code: "NOT_FOUND" }, 404);
+    const saved = state.ghostwriter?.[jobId];
+    if (!saved || (saved.job_id && saved.job_id !== jobId) ||
+        saved.quality_review?.approved !== true || state.approvedKits?.[jobId] !== true) {
+      return json({ error: "Review and approve the application for this job before saving the package.", code: "QUALITY_REVIEW_REQUIRED" }, 409);
+    }
+    const original = state.profile?.resume_text?.trim() || [state.masterResume?.ar, state.masterResume?.en].filter(Boolean).join("\n\n");
+    const kit = validateKit(saved, original);
+    if (!kit) return json({ error: "Complete both language versions and review them again.", code: "KIT_INCOMPLETE" }, 409);
     const pkg = {
       job_id: jobId,
       resume_title: `سيرة مخصصة - ${job.title}`,
-      resume_body: `مسودة سيرة مبنية على السيرة المعتمدة لدور ${job.title} لدى ${job.employer}. راجع كل معلومة قبل التقديم.`,
+      resume_body: `${kit.ar_resume}\n\n${kit.en_resume}`,
       cover_letter_title: `خطاب تقديم - ${job.employer}`,
-      cover_letter_body: `مسودة خطاب موجهة إلى ${job.employer} بناءً على السيرة المعتمدة والوصف الوظيفي.`,
-      pdf_status: "جاهزة للمراجعة",
-      generated_at: new Date().toISOString(),
+      cover_letter_body: `${kit.ar_cover_letter}\n\n${kit.en_cover_letter}`,
+      pdf_status: "معتمد",
     };
+    const previous = (state.packages || []).find((item) => item.job_id === jobId);
+    if (previous && Object.entries(pkg).every(([key, value]) => previous[key] === value)) return json(previous);
+    pkg.generated_at = saved.generated_at || new Date().toISOString();
     state.packages = [pkg, ...(state.packages || []).filter((item) => item.job_id !== jobId)];
     state.package_history = [{ ...pkg, id: `pkg-${Date.now()}` }, ...(state.package_history || [])].slice(0, 50);
     return json(pkg, 201);

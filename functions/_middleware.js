@@ -69,12 +69,15 @@ export async function onRequest(context) {
     }
   }
   const response = await context.next();
-  return withSecurityHeaders(response, isApi);
+  return withSecurityHeaders(response, isApi, url.pathname);
 }
 
-function withSecurityHeaders(response, isApi) {
+function withSecurityHeaders(response, isApi, pathname) {
   const headers = new Headers(response.headers);
   for (const [name, value] of Object.entries(SECURITY_HEADERS)) headers.set(name, value);
+  if (pathname === "/vendor/resume/ocr-5.1.1/worker.min.js") {
+    headers.set("Content-Security-Policy", "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; connect-src 'self'");
+  }
   if (isApi) {
     headers.set("Cache-Control", "no-store, private");
     headers.delete("Access-Control-Allow-Origin");

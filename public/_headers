@@ -27,3 +27,7 @@
 
 /*.png
   Cache-Control: public, max-age=604800
+
+/vendor/resume/ocr-5.1.1/worker.min.js
+  ! Content-Security-Policy
+  Content-Security-Policy: default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; connect-src 'self'

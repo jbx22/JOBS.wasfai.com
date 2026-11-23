@@ -55,7 +55,7 @@ function seedProfile() {
     target_locations: "السعودية، الخليج",
     resume_filename: "",
     resume_skills: "",
-    resume_languages: "Arabic, English",
+    resume_languages: "",
     resume_seniority: "",
     resume_regions: "Saudi Arabia, GCC",
     resume_work_examples: "",

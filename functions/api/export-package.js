@@ -5,6 +5,7 @@
  * DOCX is a minimal Office Open XML document. PDF is rendered by the
  * authenticated Rust/Typst service so Arabic shaping and font embedding remain correct.
  */
+import { buildDocx } from "../../public/resume-docx.mjs";
 import { requireProtectedRequest } from "./_security.js";
 
 export async function onRequestPost(context) {
@@ -19,14 +20,25 @@ export async function onRequestPost(context) {
     const validation = validatePayload(job, profile, kit);
     if (validation) return validation;
     const base = safeFilename(`${profile.display_name || "subscriber"}-${job.employer || "company"}-${job.title || "application"}`);
-    const content = packageText(job, profile, kit);
+    const document = payload.document || "package";
+    if (!["package", "ar_resume", "en_resume"].includes(document) || (document !== "package" && format !== "docx")) {
+      return json({ error: "Unsupported export selection.", code: "BAD_FORMAT" }, 400);
+    }
 
     if (format === "docx") {
-      const bytes = buildDocx(content);
+      const standalone = document !== "package";
+      const content = standalone ? kit[document] : packageText(job, profile, kit);
+      if (!String(content || "").trim()) {
+        return json({ error: "The selected résumé is empty.", code: "PACKAGE_REQUIRED" }, 400);
+      }
+      const language = standalone ? document.slice(0, 2) : "";
+      const bytes = buildDocx(content, language);
+      const filename = standalone ? `${base}-cv-${language}` : base;
       return new Response(bytes, {
         headers: {
           "Content-Type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-          "Content-Disposition": `attachment; filename="${base}.docx"`,
+          "Cache-Control": "private, no-store",
+          "Content-Disposition": `attachment; filename="${filename}.docx"`,
         },
       });
     }
@@ -138,32 +150,6 @@ function packageText(job, profile, kit) {
     .join("\n");
 }
 
-function buildDocx(text) {
-  const documentXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
-  <w:body>
-    ${text
-      .split(/\r?\n/)
-      .map((line) => `<w:p><w:r><w:t xml:space="preserve">${xmlEscape(line || " ")}</w:t></w:r></w:p>`)
-      .join("\n")}
-    <w:sectPr><w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440"/></w:sectPr>
-  </w:body>
-</w:document>`;
-  return zipStore([
-    ["[Content_Types].xml", `<?xml version="1.0" encoding="UTF-8"?>
-<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
-  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
-  <Default Extension="xml" ContentType="application/xml"/>
-  <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
-</Types>`],
-    ["_rels/.rels", `<?xml version="1.0" encoding="UTF-8"?>
-<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
-  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
-</Relationships>`],
-    ["word/document.xml", documentXml],
-  ]);
-}
-
 function buildPdf(text) {
   const pages = chunkLines(
     text
@@ -207,70 +193,6 @@ function buildPdf(text) {
   return new TextEncoder().encode(pdf);
 }
 
-function zipStore(entries) {
-  const encoder = new TextEncoder();
-  const files = entries.map(([name, content]) => ({
-    name,
-    nameBytes: encoder.encode(name),
-    data: encoder.encode(content),
-  }));
-  let offset = 0;
-  const localParts = [];
-  const centralParts = [];
-  for (const file of files) {
-    const crc = crc32(file.data);
-    const local = concatBytes([
-      u32(0x04034b50), u16(20), u16(0), u16(0), u16(0), u16(0), u32(crc),
-      u32(file.data.length), u32(file.data.length), u16(file.nameBytes.length), u16(0),
-      file.nameBytes, file.data,
-    ]);
-    localParts.push(local);
-    centralParts.push(concatBytes([
-      u32(0x02014b50), u16(20), u16(20), u16(0), u16(0), u16(0), u16(0), u32(crc),
-      u32(file.data.length), u32(file.data.length), u16(file.nameBytes.length), u16(0),
-      u16(0), u16(0), u16(0), u32(0), u32(offset), file.nameBytes,
-    ]));
-    offset += local.length;
-  }
-  const central = concatBytes(centralParts);
-  return concatBytes([
-    ...localParts,
-    central,
-    u32(0x06054b50), u16(0), u16(0), u16(files.length), u16(files.length),
-    u32(central.length), u32(offset), u16(0),
-  ]);
-}
-
-function crc32(bytes) {
-  let crc = -1;
-  for (const byte of bytes) {
-    crc ^= byte;
-    for (let i = 0; i < 8; i += 1) {
-      crc = (crc >>> 1) ^ (0xedb88320 & -(crc & 1));
-    }
-  }
-  return (crc ^ -1) >>> 0;
-}
-
-function u16(value) {
-  return new Uint8Array([value & 255, (value >>> 8) & 255]);
-}
-
-function u32(value) {
-  return new Uint8Array([value & 255, (value >>> 8) & 255, (value >>> 16) & 255, (value >>> 24) & 255]);
-}
-
-function concatBytes(parts) {
-  const total = parts.reduce((sum, part) => sum + part.length, 0);
-  const out = new Uint8Array(total);
-  let offset = 0;
-  for (const part of parts) {
-    out.set(part, offset);
-    offset += part.length;
-  }
-  return out;
-}
-
 function chunkLines(lines, size) {
   const chunks = [];
   for (let i = 0; i < lines.length; i += size) chunks.push(lines.slice(i, i + size));
@@ -290,10 +212,6 @@ function toPdfSafe(line) {
 
 function pdfEscape(text) {
   return String(text).replace(/\\/g, "\\\\").replace(/\(/g, "\\(").replace(/\)/g, "\\)");
-}
-
-function xmlEscape(value) {
-  return String(value).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
 function safeFilename(value) {
