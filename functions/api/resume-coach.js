@@ -12,7 +12,7 @@ import { DEEPSEEK_BASE_URL, DEEPSEEK_MODEL } from "./_deepseek.js";
 import { requireProtectedRequest } from "./_security.js";
 import { AuthError } from "./auth/_auth.js";
 
-const GENERATION_TIMEOUT_MS = 80_000;
+const GENERATION_TIMEOUT_MS = 120_000;
 
 export async function onRequestPost(context) {
   try {
@@ -74,28 +74,32 @@ async function improveWithAi(context, user, profile) {
           model,
           thinking: { type: "disabled" },
           temperature: 0.25,
-          max_tokens: 8192,
+          max_tokens: attempt > 0 || profile.resume_text.length > 12_000 ? 16384 : 8192,
           response_format: { type: "json_object" },
           messages,
         }),
       });
       if (!response.ok) {
+        await recordAiUsage(context, user, { route: "resume-coach", provider, model, status: "provider_error" });
         console.warn("Resume coach DeepSeek rejected the request", response.status);
         const code = response.status === 429 ? "AI_BUSY" : "AI_UNAVAILABLE";
         return json({ error: "AI resume coaching is temporarily unavailable.", code }, 503);
       }
 
       const data = await response.json();
-      const draft = validateCoach(parseAiJson(data?.choices?.[0]?.message?.content));
+      const choice = data?.choices?.[0];
+      const draft = choice?.finish_reason === "length" ? null : validateCoach(parseAiJson(choice?.message?.content), profile.resume_text);
       const usage = recordAiUsage(context, user, { route: "resume-coach", provider, model, usage: data?.usage, status: draft ? "ok" : "invalid_output" });
       if (typeof context.waitUntil === "function") context.waitUntil(usage);
       else await usage;
       if (draft) return { provider, model, ...draft };
+      messages.push({ role: "user", content: "Regenerate both complete documents from the full original. The previous answer was incomplete or omitted source details. Preserve the documented roles, dates, education, credentials and results in both languages. Use headings and factual bullets; return one complete JSON object." });
     }
     console.warn("Resume coach DeepSeek returned an incomplete draft");
     return json({ error: "AI resume coaching did not return both drafts.", code: "AI_INVALID_DRAFT" }, 503);
   } catch (error) {
     const timedOut = controller.signal.aborted || error?.name === "AbortError";
+    await recordAiUsage(context, user, { route: "resume-coach", provider, model, status: timedOut ? "timeout" : "provider_error" });
     console.warn("Resume coach DeepSeek request failed", timedOut ? "timeout" : "provider_error");
     return json({ error: "AI resume coaching is temporarily unavailable.", code: timedOut ? "AI_TIMEOUT" : "AI_UNAVAILABLE" }, 503);
   } finally {
@@ -122,7 +126,9 @@ function buildPrompt(profile) {
     rules: [
       "Do not invent employers, degrees, certificates, dates, metrics, or tools.",
       "Treat target roles and regions as search preferences. Include skills and languages in the resumes only when supported by the source resume.",
-      "If a metric is missing, write a placeholder like [add measurable result].",
+      "Preserve the full work history, with each stated employer, title and dates, including earlier positions. Retain documented qualifications, certifications, projects, contact details the applicant included in the CV, tools, languages, quantities and results. Keep factual detail and chronology consistent in both languages.",
+      "Use a clear professional headline, concise summary, reverse-chronological experience and education, plus other sections only when supported. Describe actual responsibilities, scope, technologies and outcomes in concrete bullets. Keep dated roles distinct.",
+      "When figures or outcomes are missing, write the supported responsibility plainly. Put questions or suggestions only in improvements. Never insert placeholders, editorial instructions or made-up achievements in either résumé.",
       "Use strong section headings, bullets, ATS keywords, and measurable achievement framing.",
       "Arabic and English resumes must be separate.",
       "LANGUAGE GATE: en_master_resume must be entirely English. Do not use Arabic script; translate source facts into English.",
@@ -133,10 +139,11 @@ function buildPrompt(profile) {
   });
 }
 
-function validateCoach(raw) {
+function validateCoach(raw, original) {
   const ar = cleanText(raw?.ar_master_resume);
   const en = cleanText(raw?.en_master_resume);
   if (ar.length <= 120 || en.length <= 120 || !/\p{Script=Arabic}/u.test(ar) || /\p{Script=Arabic}/u.test(en) || !/[A-Za-z]/.test(en)) return null;
+  if ([ar, en].some((draft) => !coversOriginal(draft, original))) return null;
   const searchProfile = raw.search_profile || {};
   return {
     ar_master_resume: ar,
@@ -152,6 +159,20 @@ function validateCoach(raw) {
   };
 }
 
+// Catch a paragraph-length rewrite of a multi-page source and silently truncated chronology.
+function coversOriginal(draft, original) {
+  if (/\[\s*(?:add|insert|enter|your|أضف|أدخل|اكتب)[^\]\n]*\]/iu.test(draft)) return false;
+  const sourceWords = original.match(/[\p{L}\p{N}]+/gu) || [];
+  const draftWords = draft.match(/[\p{L}\p{N}]+/gu) || [];
+  if (sourceWords.length >= 120 && (draftWords.length < Math.min(540, Math.floor(sourceWords.length * 0.45))
+      || draft.split(/\n+/).filter((line) => line.trim()).length < 5)) return false;
+  const normalizeDigits = (text) => text.replace(/[٠-٩۰-۹]/gu, digit =>
+    String(digit.codePointAt(0) - (digit >= "۰" ? 0x6f0 : 0x660)));
+  const years = normalizeDigits(original).match(/(?<![\p{L}\p{N}])(?:19|20)\d{2}(?![\p{L}\p{N}])/gu) || [];
+  const draftYears = new Set(normalizeDigits(draft).match(/(?<![\p{L}\p{N}])(?:19|20)\d{2}(?![\p{L}\p{N}])/gu) || []);
+  return years.every(year => draftYears.has(year)) && [...draftYears].every(year => years.includes(year));
+}
+
 function normalizeProfile(profile) {
   return {
     display_name: cleanText(profile.display_name),
@@ -162,14 +183,14 @@ function normalizeProfile(profile) {
     resume_seniority: cleanText(profile.resume_seniority),
     resume_regions: cleanText(profile.resume_regions),
     resume_work_examples: cleanText(profile.resume_work_examples),
-    resume_text: cleanText(profile.resume_text),
+    resume_text: cleanText(profile.resume_text).replace(/\(?cid:\d+\)?|\uFFFD+/giu, " ").trim(),
   };
 }
 
 function resumeReady(profile) {
   const text = profile.resume_text.replace(/\s+/g, " ").trim();
   const letters = (text.match(/\p{L}/gu) || []).length;
-  return text.length >= 120 && letters >= 80 && !/(cid:\d+|�{3,})/i.test(text);
+  return text.length >= 120 && letters >= 80 && letters / text.length >= 0.3;
 }
 
 function parseAiJson(text) {

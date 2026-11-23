@@ -276,3 +276,7 @@
 
 - Make workspace and payment updates transactional and improve PostgreSQL gateway reliability
 
+## jobs74 — 2026-11-23 18:39
+
+- Repair résumé extraction and generate complete, evidence-based DeepSeek résumés for the candidate or a selected job
+

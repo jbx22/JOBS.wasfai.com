@@ -1,9 +1,12 @@
-const CACHE_NAME = "jobs-wasfai-v73";
+const CACHE_NAME = "jobs-wasfai-v74";
 const APP_SHELL = [
   "/",
   "/app",
   "/styles.css",
   "/app.js",
+  "/resume-signals.js",
+  "/resume-extraction.js",
+  "/resume-docx.mjs",
   "/admin/",
   "/super-admin/",
   "/pricing/",
@@ -48,9 +51,12 @@ self.addEventListener("fetch", (event) => {
   }
   // HTML and application code are network-first so deployments update quickly,
   // with a versioned cached fallback for resilient read-only offline access.
-  if (url.origin === self.location.origin && (event.request.mode === "navigate" || /^\/(?:app|pricing)\.js$/.test(url.pathname))) {
+  if (url.origin === self.location.origin && (event.request.mode === "navigate" || /^\/(?:app\.js|pricing\.js|resume-extraction\.js|resume-signals\.js|resume-docx\.mjs)$/.test(url.pathname))) {
     event.respondWith(fetch(event.request, { cache: "no-store" }).then((response) => {
-      if (response.ok && !/no-store|private/i.test(response.headers.get("Cache-Control") || "")) caches.open(CACHE_NAME).then((cache) => cache.put(event.request, response.clone()));
+      if (response.ok && !/no-store|private/i.test(response.headers.get("Cache-Control") || "")) {
+        const copy = response.clone();
+        event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy)));
+      }
       return response;
     }).catch(async () => {
       const cached = await caches.match(event.request);

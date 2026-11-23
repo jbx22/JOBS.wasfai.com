@@ -23,7 +23,7 @@ const FILE_INDEX_SQL = "CREATE INDEX IF NOT EXISTS idx_resume_files_user_created
 const ALLOWED = new Map([
   ["application/pdf", { extensions: [".pdf"], signature: [0x25, 0x50, 0x44, 0x46, 0x2d] }],
   ["application/vnd.openxmlformats-officedocument.wordprocessingml.document", { extensions: [".docx"], signature: [0x50, 0x4b, 0x03, 0x04] }],
-  ["text/plain", { extensions: [".txt", ".md"], signature: null }],
+  ["text/plain", { extensions: [".txt", ".text", ".md"], signature: null }],
   ["text/markdown", { extensions: [".md"], signature: null }],
 ]);
 
@@ -97,7 +97,7 @@ function normalizeType(type, filename) {
   if (lower.endsWith(".pdf")) return "application/pdf";
   if (lower.endsWith(".docx")) return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
   if (lower.endsWith(".md")) return "text/markdown";
-  if (lower.endsWith(".txt")) return "text/plain";
+  if (lower.endsWith(".txt") || lower.endsWith(".text")) return "text/plain";
   return value;
 }
 

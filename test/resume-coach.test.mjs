@@ -82,3 +82,50 @@ test("the protected DeepSeek model probe returns the requested model and require
   assert.equal(deepseekModel("deepseek-v4-flash"), "deepseek-flash");
   assert.equal(deepseekModel("deepseek-v4-pro"), "deepseek-v4-pro");
 });
+
+test("the coach retries a generic summary and preserves the source chronology in both full drafts", async (t) => {
+  const career = [
+    "Synthetic Applicant — Instrumentation Engineer",
+    "2021–2025 — Lead instrumentation engineer, River Manufacturing. Oversaw calibration planning, documented instrument performance and coordinated shutdown schedules.",
+    "2015–2021 — Controls engineer, Southern Systems. Tested process interlocks, wrote validation procedures and verified loop diagrams against installed equipment.",
+    "2012 — Electrical engineering degree, College of Engineering. Final project covered a temperature regulation system and laboratory measurement uncertainty.",
+    "Projects — Developed an independent test fixture and trained maintenance technicians in documenting traceable calibration results and planning inspections.",
+    "Earlier assignments — Prepared change requests for instrument replacements, assessed spares alternatives, communicated vendor requirements and updated engineering records.",
+    "Delivered reconciled asset data and coordinated maintenance procedures with purchasing, field supervisors, design engineers, technicians and maintenance team leads.",
+  ].join("\n");
+  const ar = [
+    "مهندس أجهزة القياس والتحكم", "الخبرة المهنية",
+    "٢٠٢١–٢٠٢٥ — مهندس أجهزة قياس رئيسي. أشرف على تخطيط المعايرة ووثّق أداء الأجهزة ونسق مواعيد التوقف.",
+    "٢٠١٥–٢٠٢١ — مهندس تحكم. اختبر دوائر الحماية وكتب إجراءات التحقق وراجع المخططات مع الأجهزة المركبة.",
+    "التعليم", "٢٠١٢ — درجة في الهندسة الكهربائية. تناول مشروع التخرج تنظيم درجة الحرارة وعدم اليقين في القياسات المختبرية.",
+    "المشروعات", "طوّر تجهيزات الاختبار ودرب فنيي الصيانة على توثيق المعايرة. نسق طلبات التغيير وراجع قطع الغيار مع فرق المشتريات والتصميم.",
+  ].join("\n");
+  let attempts = 0;
+  const { addUser, db } = gatewayFixture(t, { otherFetch: (_url, init) => {
+    const body = JSON.parse(init.body);
+    const submitted = JSON.parse(body.messages[1].content);
+    assert.ok(submitted.profile.resume_text.includes("maintenance team leads."));
+    assert.doesNotMatch(submitted.profile.resume_text, /cid:54/);
+    if (++attempts === 1) return completion(JSON.stringify(drafts));
+    assert.equal(body.max_tokens, 16384);
+    return completion(JSON.stringify({ ...drafts, ar_master_resume: ar, en_master_resume: career }));
+  } });
+  addUser();
+  const res = await coach({ env, request: await request({ profile: { resume_text: career + " (cid:54)" } }) });
+  assert.equal(res.status, 200);
+  assert.equal((await res.json()).en_master_resume, career);
+  assert.deepEqual(db.prepare("SELECT status FROM ai_usage ORDER BY id").all().map(x => x.status), ["invalid_output", "ok"]);
+});
+
+test("the coach rejects provider truncation and fabricated dates even in otherwise valid JSON", async (t) => {
+  let attempts = 0;
+  const { addUser } = gatewayFixture(t, { otherFetch: () => {
+    const output = { ...drafts, en_master_resume: drafts.en_master_resume + " Awarded an advanced diploma in 2015." };
+    return Response.json({ choices: [{ finish_reason: ++attempts === 1 ? "length" : "stop", message: { content: JSON.stringify(output) } }] });
+  } });
+  addUser();
+  const res = await coach({ env, request: await request() });
+  assert.equal(res.status, 503);
+  assert.equal((await res.json()).code, "AI_INVALID_DRAFT");
+  assert.equal(attempts, 2);
+});

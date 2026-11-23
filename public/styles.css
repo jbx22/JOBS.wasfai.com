@@ -1450,6 +1450,17 @@ p {
   line-height: 1.7;
 }
 
+.resume-preview summary {
+  cursor: pointer;
+  color: var(--ink);
+}
+
+.resume-preview .lede {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  margin-top: 0.5rem;
+}
+
 /* Guided workflow */
 .how-grid {
   display: grid;

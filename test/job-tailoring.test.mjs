@@ -2,6 +2,9 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { onRequestPost as generate } from "../functions/api/ghostwriter.js";
 import { onRequestPost as exportKit } from "../functions/api/export-package.js";
+import { onRequest as workspaceRoute } from "../functions/api/[[route]].js";
+import { readUserState, writeUserState } from "../functions/api/_state.js";
+import { getJobDb } from "../functions/api/_db.js";
 import { sessionCookie } from "../functions/api/auth/_auth.js";
 import { gatewayFixture, testEnv } from "./helpers/gateway.mjs";
 
@@ -36,6 +39,33 @@ async function call(handler, payload) {
 function providerReply(value) {
   return Response.json({ choices: [{ message: { content: JSON.stringify(value) } }] });
 }
+
+test("legacy package route uses the reviewed saved application and never writes a placeholder", async (t) => {
+  const { addUser, identity } = gatewayFixture(t);
+  addUser();
+  const db = getJobDb(testEnv);
+  const cookie = (await sessionCookie(identity, testEnv.AUTH_COOKIE_SECRET)).split(";")[0];
+  const request = () => workspaceRoute({ env: testEnv, request: new Request("https://jobs.wasfai.com/api/packages/one/generate", {
+    method: "POST", headers: { Cookie: cookie },
+  }) });
+  const savedKit = { ...draft, job_id: job.id, quality_review: review };
+  const state = { jobs: [job], packages: [], package_history: [], profile,
+    ghostwriter: { [job.id]: savedKit }, approvedKits: { [job.id]: false } };
+  await writeUserState(db, identity, state);
+  assert.equal((await request()).status, 409);
+  state.approvedKits[job.id] = true;
+  await writeUserState(db, identity, { ...state, ghostwriter: { [job.id]: { ...savedKit, en_resume: "A short preview" } } });
+  assert.equal((await (await request()).json()).code, "KIT_INCOMPLETE");
+  assert.equal((await readUserState(db, identity)).packages.length, 0);
+  await writeUserState(db, identity, state);
+  const response = await request();
+  assert.equal(response.status, 201);
+  const document = await response.json();
+  assert.equal(document.resume_body, `${draft.ar_resume.trim()}\n\n${draft.en_resume.trim()}`);
+  assert.equal(document.cover_letter_body, `${draft.ar_cover_letter}\n\n${draft.en_cover_letter}`);
+  assert.equal((await request()).status, 200);
+  assert.equal((await readUserState(db, identity)).package_history.length, 1);
+});
 
 test("a kit highlights evidence exceeding this job's criteria and surfaces a real gap for private review", async (t) => {
   const calls = [];
@@ -84,4 +114,43 @@ test("the generator asks for a posting when there are only job title and employe
   const response = await call(generate, { job: { ...job, description: "" }, profile, ai_model: "deepseek" });
   assert.equal(response.status, 400);
   assert.equal((await response.json()).code, "JOB_DETAILS_REQUIRED");
+});
+
+test("the original CV is the review evidence and an approved master cannot prove a new certification", async (t) => {
+  const claimed = "Obtained forklift certification from a licensed trainer.";
+  const merged = { ...profile, approved_master_resume: profile.resume_text + " " + claimed };
+  let attempts = 0;
+  const { addUser } = gatewayFixture(t, { otherFetch: (url, init) => {
+    assert.equal(url, "https://api.deepseek.com/v1/chat/completions");
+    const request = JSON.parse(init.body);
+    assert.equal(request.model, "deepseek-flash");
+    const prompt = JSON.parse(request.messages[1].content);
+    assert.equal(prompt.source_resume, profile.resume_text);
+    if (++attempts === 1) {
+      assert.equal(prompt.approved_master, merged.approved_master_resume);
+      return providerReply(draft);
+    }
+    return providerReply({ ...review, requirements: [rows[0], { ...rows[1], status: "meets", evidence_quote: claimed, resume_covered: true }, rows[2]] });
+  } });
+  addUser();
+  const response = await call(generate, { job, profile: merged });
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).quality_review.approved, false);
+  assert.equal(attempts, 2);
+});
+
+test("a truncated generation is retried and invalid model output is never logged as a completed résumé", async (t) => {
+  let attempts = 0;
+  const { addUser, db } = gatewayFixture(t, { otherFetch: (_url, init) => {
+    const body = JSON.parse(init.body);
+    if (++attempts === 1) return Response.json({ choices: [{ finish_reason: "length", message: { content: JSON.stringify(draft) } }] });
+    assert.equal(body.max_tokens, 16384);
+    return Response.json({ choices: [{ message: { content: "Invalid JSON" } }] });
+  } });
+  addUser();
+  const response = await call(generate, { job, profile, ai_model: "deepseek" });
+  assert.equal(response.status, 503);
+  assert.equal((await response.json()).code, "AI_INVALID_DRAFT");
+  assert.equal(attempts, 2);
+  assert.deepEqual(db.prepare("SELECT status FROM ai_usage WHERE route='ghostwriter.generate' ORDER BY id").all().map(x => x.status), ["invalid_output", "invalid_output"]);
 });

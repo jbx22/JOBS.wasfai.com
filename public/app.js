@@ -1,6 +1,9 @@
 /* JOBS.wasfai.com — Arabic-first RTL mobile PWA */
 "use strict";
 
+import { inferResumeSignals, inferRoleFromResume, readableResumeText } from "./resume-signals.js";
+import { extractResumeFileText, resumeExtractionErrorMessage } from "./resume-extraction.js";
+
 /* ---------------- Constants ---------------- */
 const STATUS_LABELS = {
   discovered: "مكتشفة",
@@ -35,17 +38,6 @@ const AI_WRITER_MODELS = [
   { id: "minimax-m3", label: "MiniMax M3" },
   { id: "glm-5.2", label: "GLM 5.2" },
 ];
-
-const PDFJS_MODULE_URL = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.min.mjs";
-const PDFJS_WORKER_URL = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.worker.min.mjs";
-const TESSERACT_MODULE_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.esm.min.js";
-const JSZIP_MODULE_URL = "https://cdn.jsdelivr.net/npm/jszip@3.10.1/+esm";
-
-// OCR is deliberately performed in the browser. Uploaded CV pages are never
-// sent to the JOBS API or an OCR service; the browser downloads the OCR engine
-// and Arabic/English language data, renders the PDF locally, and recognizes it.
-const OCR_MAX_PAGES = 8;
-const OCR_RENDER_SCALE = 2;
 
 const REGIONS = [
   { id: "", label: "الكل" },
@@ -83,7 +75,7 @@ let state = {
     target_locations: "السعودية، الخليج",
     resume_filename: "",
     resume_skills: "",
-    resume_languages: "Arabic, English",
+    resume_languages: "",
     resume_seniority: "",
     resume_regions: "Saudi Arabia, GCC",
     resume_work_examples: "",
@@ -119,6 +111,8 @@ let state = {
   applicationDraftTask: null,
   resumeCoach: null,
   resumeCoachPending: false,
+  jobWriterPending: false,
+  resumeImportPending: false,
   approvedMasterResume: false,
   masterResume: { ar: "", en: "", approved_at: "" },
   tailoringBriefs: {},
@@ -366,6 +360,17 @@ function safeDownloadName(value) {
     .slice(0, 60) || "application";
 }
 
+function downloadBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
 function navigate(route) {
   const path = route.startsWith("/") ? route : `/${route}`;
   if (location.pathname + location.search !== path) {
@@ -472,7 +477,7 @@ function applicationErrorMessage(code) {
     case "KIT_INCOMPLETE": return english ? "Complete both language versions before review." : "أكمل المستندات باللغتين قبل المراجعة.";
     case "QUALITY_REVIEW_REQUIRED": return english ? "Review the current documents before exporting." : "راجع المستندات الحالية قبل التصدير.";
     case "JOB_CONTEXT_CHANGED": return english ? "The job or source résumé changed during generation. Generate again." : "تغيّرت معلومات الوظيفة أو السيرة أثناء التوليد. أعد التوليد.";
-    default: return "";
+    default: return RESUME_COACH_ERRORS[code] || "";
   }
 }
 
@@ -663,23 +668,79 @@ async function uploadResumeFile(file) {
   const response = await fetch("/api/resumes", { method: "POST", body: form });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(payload.error || "Secure resume upload failed.");
-  state.resumeFile = payload.file || null;
-  return state.resumeFile;
+  if (!payload.file?.id) throw new Error("Resume storage returned no file.");
+  return payload.file;
+}
+
+async function importProfileResume(file, savedFile = null) {
+  if (state.resumeImportPending || (!file && !savedFile)) return;
+  state.resumeImportPending = true;
+  const account = state.session?.user?.sub;
+  const previousText = state.profile?.resume_text;
+  const progress = (message) => {
+    state.action = { pending: "resume-upload", message, error: "" };
+    render();
+  };
+  const checkContext = () => {
+    if (account !== state.session?.user?.sub || previousText !== state.profile?.resume_text) {
+      const error = new Error("Source changed during extraction");
+      error.code = "RESUME_CHANGED";
+      throw error;
+    }
+  };
+  try {
+    progress("جاري قراءة ملف السيرة…");
+    if (savedFile) {
+      const response = await fetch(`/api/resumes/${encodeURIComponent(savedFile.id)}`, { cache: "no-store" });
+      if (!response.ok) throw Object.assign(new Error(), { code: "SAVED_FILE_UNAVAILABLE" });
+      file = new File([await response.blob()], savedFile.name, { type: savedFile.content_type });
+    }
+    const text = await extractResumeFileText(file, progress);
+    if (!readableResumeText(text)) throw Object.assign(new Error(), { code: "OCR_UNREADABLE" });
+    checkContext();
+    let storageFailed = false;
+    if (!savedFile && state.session?.authenticated) {
+      progress("جاري حفظ الملف الأصلي مشفراً…");
+      try {
+        const stored = await uploadResumeFile(file);
+        if (account === state.session?.user?.sub) state.resumeFile = stored;
+      } catch {
+        storageFailed = true;
+      }
+    }
+    checkContext();
+    if (previousText !== text) resetResumeCoach();
+    applyResumeSignalsFromText(text);
+    state.profile.resume_filename = file.name;
+    saveLocalProfile(state.profile);
+    saveLocalAiWriterState();
+    state.action = storageFailed
+      ? { pending: "", message: "", error: "استخرجنا النص وهو جاهز للتحسين، لكن تعذر حفظ نسخة الملف الأصلي في الحساب." }
+      : { pending: "", message: "تم استخراج نص السيرة. يمكنك مراجعته ثم تحسينه باستخدام DeepSeek.", error: "" };
+  } catch (error) {
+    const message = error.code === "SAVED_FILE_UNAVAILABLE"
+      ? "تعذر تنزيل ملف السيرة المحفوظ. أعد رفع الملف من جهازك."
+      : error.code === "RESUME_CHANGED" ? RESUME_COACH_ERRORS.RESUME_CHANGED : resumeExtractionErrorMessage(error);
+    state.action = { pending: "", message: "", error: message };
+  } finally {
+    state.resumeImportPending = false;
+    render();
+  }
 }
 
 function originalResumeReady(profile = state.profile) {
-  return Boolean((profile.resume_text || "").trim().length > 120);
+  return readableResumeText(profile?.resume_text);
 }
 
 function masterResumeReady() {
   return Boolean(
     state.approvedMasterResume &&
-      ((state.masterResume?.ar || "").trim().length > 120 || (state.masterResume?.en || "").trim().length > 120),
+      (readableResumeText(state.masterResume?.ar) || readableResumeText(state.masterResume?.en) || originalResumeReady()),
   );
 }
 
 function approvedProfile() {
-  const master = state.masterResume || {};
+  const master = state.approvedMasterResume ? state.masterResume || {} : {};
   return {
     ...(state.profile || {}),
     master_resume_ar: master.ar || "",
@@ -957,245 +1018,22 @@ function profileCompleteness(profile = state.profile) {
   return Math.round((checks.filter((x) => String(x || "").trim()).length / checks.length) * 100);
 }
 
-function inferResumeSignals(text) {
-  const lines = String(text || "")
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean);
-  const pick = (labels) => {
-    const found = lines.find((line) =>
-      labels.some((label) => line.toLowerCase().startsWith(label)),
-    );
-    return found ? found.replace(/^[^:：-]+[:：-]\s*/, "").trim() : "";
-  };
-  const detectedRole = inferRoleFromResume(text);
-  const detectedSkills = inferSkillsFromResume(text);
-  const detectedExamples = inferExamplesFromResume(text);
-  return {
-    display_name: pick(["name", "الاسم"]),
-    target_roles: normalizeRoleDisplay(pick(["role", "target", "title", "المسمى", "الدور"]) || detectedRole),
-    target_locations: pick(["location", "locations", "الموقع", "المدن"]),
-    resume_skills: pick(["skills", "المهارات"]) || detectedSkills,
-    resume_languages: pick(["languages", "اللغات"]) || inferLanguagesFromResume(text),
-    resume_seniority: pick(["seniority", "level", "المستوى"]) || inferSeniorityFromResume(text),
-    resume_regions: pick(["regions", "markets", "النطاق", "المناطق"]),
-    resume_work_examples: pick(["examples", "achievements", "projects", "الإنجازات", "الأمثلة"]) || detectedExamples,
-  };
-}
-
-async function extractResumeFileText(file) {
-  const name = (file?.name || "").toLowerCase();
-  const type = (file?.type || "").toLowerCase();
-  if (type.includes("pdf") || name.endsWith(".pdf")) {
-    return extractPdfText(file);
-  }
-  if (type.includes("wordprocessingml") || name.endsWith(".docx")) {
-    return extractDocxText(file);
-  }
-  if (name.endsWith(".doc")) {
-    throw new Error("DOC_LEGACY_UNSUPPORTED");
-  }
-  return file.text();
-}
-
-async function extractDocxText(file) {
-  const { default: JSZip } = await import(JSZIP_MODULE_URL);
-  const archive = await JSZip.loadAsync(await file.arrayBuffer());
-  const documentXml = await archive.file("word/document.xml")?.async("string");
-  if (!documentXml) throw new Error("DOCX_DOCUMENT_XML_MISSING");
-
-  // Word stores the document in XML inside a ZIP. Decode it in the browser so
-  // Arabic text remains Unicode text rather than being pasted as ZIP bytes.
-  const xml = new DOMParser().parseFromString(documentXml, "application/xml");
-  if (xml.querySelector("parsererror")) throw new Error("DOCX_XML_INVALID");
-  return [...xml.getElementsByTagName("*")]
-    .filter((element) => element.localName === "p")
-    .map((paragraph) => paragraph.textContent.replace(/\u00a0/g, " ").trim())
-    .filter(Boolean)
-    .join("\n")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
-}
-
-function applyResumeSignalsFromText(text, keepName = true) {
+function applyResumeSignalsFromText(text, preserveEdits = false) {
+  const current = state.profile || {};
   const signals = inferResumeSignals(text);
-  const cleared = {
-    target_roles: "",
-    resume_skills: "",
-    resume_seniority: "",
-    resume_work_examples: "",
-  };
-  const cleanSignals = Object.fromEntries(
-    Object.entries(signals).filter(([key, value]) => {
-      if (!String(value || "").trim()) return false;
-      return keepName || key !== "display_name";
-    }),
-  );
+  if (preserveEdits) {
+    for (const field of Object.keys(signals)) {
+      if (current[field]?.trim()) signals[field] = current[field];
+    }
+  }
   state.profile = {
-    ...(state.profile || {}),
-    ...cleared,
-    ...cleanSignals,
+    ...current,
+    ...signals,
+    display_name: signals.display_name || current.display_name || "",
+    target_roles: signals.target_roles || current.target_roles || "",
+    target_locations: signals.target_locations || current.target_locations || "",
     resume_text: text,
   };
-}
-
-function readableResumeText(text) {
-  const clean = String(text || "").replace(/\s+/g, " ").trim();
-  const letters = (clean.match(/[\p{L}]/gu) || []).length;
-  return clean.length >= 120 && letters >= 80 && !/(cid:\d+|�{3,})/i.test(clean);
-}
-
-function inferRoleFromResume(text) {
-  const value = String(text || "").toLowerCase();
-  const roles = [
-    [/mechanical|ميكانيك|ميكانيكي|mechanic/i, "مهندس ميكانيكي"],
-    [/factory|industrial|manufactur|مصنع|مصانع|صناعي|تصنيع/i, "استشاري أو مدير مشاريع صناعية"],
-    [/\bcapex\b|project|pmp|مشاريع|مشروع/i, "مدير مشاريع"],
-    [/\bo&m\b|maintenance|reliability|تشغيل|صيانة|اعتمادية/i, "مدير تشغيل وصيانة"],
-    [/consult|استشاري|تطوير/i, "استشاري تطوير أعمال صناعية"],
-  ];
-  return roles.find(([pattern]) => pattern.test(value))?.[1] || "";
-}
-
-function normalizeRoleDisplay(role) {
-  const value = String(role || "");
-  if (!value.trim()) return "";
-  const lower = value.toLowerCase();
-  const roles = [];
-  if (/mechanical|ميكانيك|ميكانيكي/.test(lower)) roles.push("مهندس ميكانيكي");
-  if (/industrial|factory|manufactur|مصنع|مصانع|صناعي|تصنيع/.test(lower)) roles.push("مدير مشاريع صناعية");
-  if (/consult|استشاري|factory development|تطوير مصانع/.test(lower)) roles.push("استشاري تطوير مصانع");
-  if (/\bcapex\b|project|pmp|مشاريع|مشروع/.test(lower)) roles.push("مدير مشاريع");
-  if (/\bo&m\b|maintenance|reliability|تشغيل|صيانة|اعتمادية/.test(lower)) roles.push("مدير تشغيل وصيانة");
-  return roles.length ? [...new Set(roles)].slice(0, 4).join("، ") : value;
-}
-
-function inferSkillsFromResume(text) {
-  const value = String(text || "");
-  const candidates = [
-    ["Mechanical engineering", /mechanical|ميكانيك|ميكانيكي/i],
-    ["Industrial operations", /industrial|factory|manufactur|مصنع|صناعي|تصنيع/i],
-    ["Project management", /project|pmp|مشاريع|مشروع/i],
-    ["Risk management", /risk|pmi-rmp|مخاطر/i],
-    ["CAPEX", /\bcapex\b|رأس المال|استثمار/i],
-    ["O&M", /\bo&m\b|operation|maintenance|تشغيل|صيانة/i],
-    ["Reliability", /reliability|اعتمادية/i],
-    ["Factory design", /factory design|تصميم مصانع|تصميم مصنع/i],
-    ["Stakeholder management", /stakeholder|حكوم|جهات|أصحاب المصلحة/i],
-    ["Safety and compliance", /safety|compliance|hse|سلامة|امتثال/i],
-    ["Arabic", /arabic|العربية/i],
-    ["English", /english|الإنجليزية/i],
-  ];
-  const matched = candidates.filter(([, pattern]) => pattern.test(value)).map(([label]) => label);
-  return matched.slice(0, 10).join(", ");
-}
-
-function inferLanguagesFromResume(text) {
-  const value = String(text || "").toLowerCase();
-  const langs = [];
-  if (/arabic|العربية|عربي/.test(value)) langs.push("Arabic");
-  if (/english|الإنجليزية|انجليزي|إنجليزي/.test(value)) langs.push("English");
-  return langs.join(", ");
-}
-
-function inferSeniorityFromResume(text) {
-  const value = String(text || "").toLowerCase();
-  if (/director|head|general manager|رئيس|مدير عام|تنفيذي/.test(value)) return "Director / Executive";
-  if (/manager|lead|senior|مدير|قائد|أول|كبير/.test(value)) return "Senior / Manager";
-  if (/consultant|استشاري/.test(value)) return "Consultant";
-  return "";
-}
-
-function inferExamplesFromResume(text) {
-  const lines = String(text || "")
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter((line) => line.length > 35 && /managed|led|delivered|built|improved|reduced|increased|قاد|أدار|نفذ|طور|حسن|خفض|رفع|أنجز/i.test(line))
-    .slice(0, 4);
-  return lines.join("\n");
-}
-
-async function extractPdfText(file, onProgress = () => {}) {
-  const pdfjs = await import(PDFJS_MODULE_URL);
-  pdfjs.GlobalWorkerOptions.workerSrc = PDFJS_WORKER_URL;
-  const bytes = new Uint8Array(await file.arrayBuffer());
-  const pdf = await pdfjs.getDocument({ data: bytes }).promise;
-  const pages = [];
-  const pageCount = Math.min(pdf.numPages, OCR_MAX_PAGES);
-  for (let pageNo = 1; pageNo <= pageCount; pageNo += 1) {
-    const page = await pdf.getPage(pageNo);
-    const content = await page.getTextContent();
-    pages.push(extractPdfPageText(content.items));
-  }
-  const embeddedText = pages.join("\n\n").replace(/[ \t]+/g, " ").trim();
-  if (readableResumeText(embeddedText)) {
-    await pdf.destroy();
-    return embeddedText;
-  }
-
-  onProgress(`لم يُعثر على نص داخل الملف. جاري تشغيل OCR عربي/إنجليزي للصفحة 1 من ${pageCount}...`);
-  let worker;
-  try {
-    const { createWorker } = await import(TESSERACT_MODULE_URL);
-    worker = await createWorker(["ara", "eng"], 1, {
-      logger: (message) => {
-        if (message.status === "recognizing text" && Number.isFinite(message.progress)) {
-          onProgress(`جاري OCR عربي/إنجليزي: ${Math.round(message.progress * 100)}%`);
-        }
-      },
-    });
-    const ocrPages = [];
-    for (let pageNo = 1; pageNo <= pageCount; pageNo += 1) {
-      onProgress(`جاري قراءة الصفحة ${pageNo} من ${pageCount} بتقنية OCR عربي/إنجليزي...`);
-      const page = await pdf.getPage(pageNo);
-      const viewport = page.getViewport({ scale: OCR_RENDER_SCALE });
-      const canvas = document.createElement("canvas");
-      canvas.width = Math.ceil(viewport.width);
-      canvas.height = Math.ceil(viewport.height);
-      const canvasContext = canvas.getContext("2d", { willReadFrequently: true });
-      if (!canvasContext) throw new Error("OCR_CANVAS_UNAVAILABLE");
-      await page.render({ canvasContext, viewport }).promise;
-      const result = await worker.recognize(canvas);
-      ocrPages.push(result?.data?.text || "");
-      canvas.width = 1;
-      canvas.height = 1;
-      page.cleanup?.();
-    }
-    const ocrText = ocrPages.join("\n\n").replace(/[ \t]+/g, " ").trim();
-    if (!readableResumeText(ocrText)) throw new Error("OCR_TEXT_TOO_SHORT");
-    return ocrText;
-  } finally {
-    await worker?.terminate?.();
-    await pdf.destroy();
-  }
-}
-
-function extractPdfPageText(items) {
-  const rows = [];
-  for (const item of items) {
-    const text = String(item?.str || "").trim();
-    if (!text) continue;
-    const transform = Array.isArray(item.transform) ? item.transform : [];
-    const x = Number(transform[4] || 0);
-    const y = Number(transform[5] || 0);
-    let row = rows.find((candidate) => Math.abs(candidate.y - y) < 3);
-    if (!row) {
-      row = { y, parts: [] };
-      rows.push(row);
-    }
-    row.parts.push({ text, x, rtl: item.dir === "rtl" || /[\u0600-\u06FF]/.test(text) });
-  }
-
-  return rows
-    .sort((a, b) => b.y - a.y)
-    .map((row) => {
-      const rtl = row.parts.some((part) => part.rtl);
-      return row.parts
-        .sort((a, b) => (rtl ? b.x - a.x : a.x - b.x))
-        .map((part) => part.text)
-        .join(" ");
-    })
-    .join("\n");
 }
 
 function jobById(id) {
@@ -1899,12 +1737,15 @@ function renderJobDetail(id) {
     </div>
   </div>`;
 
+  const resumeBody = (state.locale === "en" ? ghostwriter?.en_resume : ghostwriter?.ar_resume)
+    || ghostwriter?.ar_resume || ghostwriter?.en_resume || pkg?.resume_body || job.tailored_resume;
   const resume = `<div class="tab-panel">
     <div class="section-block">
       <h3>السيرة الذاتية المخصصة</h3>
-      <p class="lede">${esc(job.tailored_resume || "لم يتم إنشاء سيرة مخصصة بعد.")}</p>
+      ${resumeBody ? `<details class="resume-preview"><summary>${state.locale === "en" ? "View full résumé" : "عرض السيرة الذاتية كاملة"}</summary>
+        <p class="lede" dir="auto">${esc(resumeBody)}</p></details>` : `<p class="lede">${state.locale === "en" ? "Generate a résumé for this job." : "لم يتم إنشاء سيرة مخصصة بعد."}</p>`}
       <div class="row">
-        <button class="btn primary" data-ghostwriter="${esc(job.id)}">${iconSpark()} AI كاتب</button>
+        <button class="btn primary" data-ghostwriter="${esc(job.id)}">${iconSpark()} تخصيص سيرتي لهذه الوظيفة</button>
         <button class="btn outline" data-copy-ghostwriter="${esc(job.id)}">${iconDoc()} نسخ الحزمة</button>
       </div>
     </div>
@@ -2005,7 +1846,7 @@ function renderGhostwriterPanel(job, kit) {
       <label>${state.locale === "en" ? "Full job posting or recruiter notes" : "إعلان الوظيفة الكامل أو ملاحظات مسؤول التوظيف"}</label>
       <textarea data-tailoring-brief="${esc(job.id)}" placeholder="${state.locale === "en" ? "Paste the full posting if the imported description is incomplete." : "الصق إعلان الوظيفة كاملاً إذا كان الوصف المستورد مختصراً."}">${esc(state.tailoringBriefs?.[job.id] || "")}</textarea>
     </div>
-    ${resumeReady ? "" : `<div class="empty compact">لنتيجة أفضل: افتح الحساب وأضف السيرة الأصلية قبل التوليد. بدونها سيستخدم الكاتب إشارات مختصرة فقط.</div>`}
+    ${resumeReady ? "" : `<div class="empty compact">افتح الحساب وأضف السيرة الأصلية قبل التوليد. يحتاج التخصيص إلى نص السيرة المقروء.</div>`}
     <div class="ghostwriter-actions">
       <button class="btn primary" data-ghostwriter="${esc(job.id)}">${iconSpark()} توليد الحزمة الكاملة</button>
       <button class="btn outline" data-nav="/account">${iconUser()} السيرة الأصلية</button>
@@ -2015,8 +1856,8 @@ function renderGhostwriterPanel(job, kit) {
     ${
       hasKit
         ? `<div class="ghostwriter-grid">
-          ${ghostDoc("السيرة العربية", kit.ar_resume, "ar_resume", job.id)}
-          ${ghostDoc("English resume", kit.en_resume, "en_resume", job.id)}
+          ${ghostDoc("السيرة العربية", kit.ar_resume, "ar_resume", job.id, approved)}
+          ${ghostDoc("English resume", kit.en_resume, "en_resume", job.id, approved)}
           ${ghostDoc("خطاب عربي", kit.ar_cover_letter, "ar_cover_letter", job.id)}
           ${ghostDoc("English cover letter", kit.en_cover_letter, "en_cover_letter", job.id)}
           ${ghostList("تحضير المقابلة", kit.ar_interview_prep)}
@@ -2161,16 +2002,23 @@ function renderInterviewChat(job) {
         <label>سؤالك للمقابلة</label>
         <textarea data-interview-question="${esc(job.id)}" placeholder="اكتب سؤالاً مرتبطاً بهذه الوظيفة...">${esc(state.interviewQuestions?.[job.id] || "")}</textarea>
       </div>
-      <button class="btn primary" data-ask-interview="${esc(job.id)}">${iconSpark()} اسأل AI كاتب</button>
+      <button class="btn primary" data-ask-interview="${esc(job.id)}">${iconSpark()} اسأل تخصيص سيرتي لهذه الوظيفة</button>
       <button class="btn outline" data-start-mock-interview="${esc(job.id)}">${iconBolt()} Start a mock interview</button>
     </div>
   </div>`;
 }
 
-function ghostDoc(title, body, field = "", jobId = "") {
+function masterDownloadButton(language, approved) {
+  const ready = approved && Boolean(state.masterResume?.[language]?.trim());
+  return `<button class="btn outline sm" data-export-master="${language}" ${ready ? "" : "disabled"}>${iconDoc()} ${state.locale === "en" ? "Download résumé" : "تنزيل السيرة"} (DOCX)</button>`;
+}
+
+function ghostDoc(title, body, field = "", jobId = "", approved = false) {
+  const resume = field === "ar_resume" || field === "en_resume";
   return `<article class="ghost-doc">
     <h4>${esc(title)}</h4>
-    ${field ? `<textarea class="document-editor" data-kit-document="${esc(field)}" data-job-id="${esc(jobId)}" aria-label="${esc(title)}">${esc(body || "")}</textarea><small class="muted tiny">Edit this job-specific draft before approval. Changes are saved to this application only.</small>` : `<pre>${esc(body || "لم يتم التوليد بعد.")}</pre>`}
+    ${field ? `<textarea class="document-editor" data-kit-document="${esc(field)}" data-job-id="${esc(jobId)}" dir="${field.startsWith("ar_") ? "rtl" : "ltr"}" aria-label="${esc(title)}">${esc(body || "")}</textarea><small class="muted tiny">Edit this job-specific draft before approval. Changes are saved to this application only.</small>` : `<pre>${esc(body || "لم يتم التوليد بعد.")}</pre>`}
+    ${resume ? `<button class="btn outline sm" data-export-kit="docx" data-export-document="${field}" data-job-id="${esc(jobId)}" ${approved ? "" : "disabled"}>${iconDoc()} ${state.locale === "en" ? "Download résumé" : "تنزيل السيرة"} (DOCX)</button>` : ""}
   </article>`;
 }
 
@@ -2394,7 +2242,7 @@ function renderAccount() {
         <div class="tags">
           <span class="tag ${resumeReady ? "teal" : "gold"}">${resumeReady ? "السيرة الأصلية محفوظة" : "السيرة الأصلية ناقصة"}</span>
           <span class="tag outline">${esc(p.resume_filename || "بدون ملف")}</span>
-          <span class="tag outline">${esc(p.resume_languages || "Arabic, English")}</span>
+          ${p.resume_languages ? `<span class="tag outline">${esc(p.resume_languages)}</span>` : ""}
         </div>
       </div>
     </section>
@@ -2413,13 +2261,13 @@ function renderAccount() {
               ${iconDoc()}
               <strong>رفع PDF أو DOCX</strong>
               <small>نقرأ السيرة العربية والإنجليزية تلقائياً</small>
-              <input type="file" data-resume-file accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document" data-resume-kind="pdf" hidden />
+              <input type="file" data-resume-file ${state.resumeImportPending ? "disabled" : ""} accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document" data-resume-kind="pdf" hidden />
             </label>
             <label class="resume-upload-card">
               ${iconDoc()}
               <strong>رفع TXT/MD</strong>
               <small>للملفات النصية أو Markdown</small>
-              <input type="file" data-resume-file accept=".txt,.md,.text,text/plain,text/markdown" data-resume-kind="text" hidden />
+              <input type="file" data-resume-file ${state.resumeImportPending ? "disabled" : ""} accept=".txt,.md,.text,text/plain,text/markdown" data-resume-kind="text" hidden />
             </label>
             <button class="resume-upload-card" data-focus-resume>
               ${iconSpark()}
@@ -2441,11 +2289,12 @@ function renderAccount() {
           </div>
           ${state.resumeFile ? `
             <div class="row profile-actions" data-secure-resume-file>
-              <span class="tag teal">D1 + R2 · AES-256-GCM</span>
+              <span class="tag teal">${esc(state.resumeFile.name)}</span>
+              <button class="btn outline sm" data-reextract-resume ${state.resumeImportPending ? "disabled" : ""}>استخراج النص من الملف المحفوظ</button>
               <a class="btn outline sm" href="${esc(state.resumeFile.download_url)}">تنزيل الملف الأصلي</a>
               <button class="btn outline sm" data-delete-resume-file="${esc(state.resumeFile.id)}">حذف الملف الأصلي</button>
             </div>
-          ` : state.session?.authenticated ? `<p class="muted tiny">سيُحفظ الملف الأصلي مشفراً في R2، وتُحفظ بياناته والنص المستخرج في D1.</p>` : `<p class="muted tiny">سجّل الدخول لحفظ الملف الأصلي بصورة خاصة ومشفرة.</p>`}
+          ` : state.session?.authenticated ? `<p class="muted tiny">يمكنك إعادة استخراج النص من الملف الأصلي بعد حفظه مشفراً في حسابك.</p>` : `<p class="muted tiny">سجّل الدخول لحفظ الملف الأصلي بصورة خاصة ومشفرة.</p>`}
         </div>
       </div>
     </section>
@@ -2527,7 +2376,7 @@ function renderResumeCoach() {
         <div class="section-head tight">
           <div>
             <h3>مدرب السيرة بالذكاء الاصطناعي</h3>
-            <p class="muted tiny">حسّن السيرة واعتمدها أولاً. بعدها تعتمد المطابقة وحزم التقديم على السيرة الحقيقية فقط.</p>
+            <p class="muted tiny">ينشئ DeepSeek نسخة عربية وأخرى إنجليزية من خبراتك ومؤهلاتك. اختر السيرة الكاملة أو خصّصها لإعلان وظيفة.</p>
           </div>
           <span class="badge ${approved ? "" : "muted"}" data-coach-approval>${approved ? "السيرة معتمدة" : "تحتاج اعتماد"}</span>
         </div>
@@ -2543,11 +2392,13 @@ function renderResumeCoach() {
           <div class="coach-grid" data-coach-draft>
             <div>
               <h4>السيرة العربية المحسنة</h4>
-              <textarea class="document-editor" data-master-resume="ar" aria-label="Arabic master resume">${esc(coach.ar_master_resume || "")}</textarea>
+              <textarea class="document-editor" data-master-resume="ar" dir="rtl" aria-label="Arabic master resume">${esc(coach.ar_master_resume || "")}</textarea>
+              ${masterDownloadButton("ar", approved)}
             </div>
             <div>
               <h4>السيرة الإنجليزية المحسنة</h4>
-              <textarea class="document-editor" data-master-resume="en" aria-label="English master resume">${esc(coach.en_master_resume || "")}</textarea>
+              <textarea class="document-editor" data-master-resume="en" dir="ltr" aria-label="English master resume">${esc(coach.en_master_resume || "")}</textarea>
+              ${masterDownloadButton("en", approved)}
             </div>
           </div>
           <div class="tags" data-coach-draft>
@@ -2560,10 +2411,20 @@ function renderResumeCoach() {
           <p class="muted tiny" data-coach-draft>${esc(coach.approval_note || "راجع السيرة قبل الاعتماد.")}</p>
         ` : ""}
         <div class="row profile-actions">
-          <button class="btn primary" data-resume-coach ${ready && signedIn && !pending ? "" : "disabled"}>${iconSpark()} ${pending ? "جاري تحسين السيرة…" : "تحسين السيرة"}</button>
+          <button class="btn primary" data-resume-coach ${ready && signedIn && !pending ? "" : "disabled"}>${iconSpark()} ${pending ? "جاري تحسين السيرة…" : "تحسين السيرة الكاملة باستخدام DeepSeek"}</button>
           <button class="btn ${approved ? "outline" : "primary"}" data-approve-master-resume ${coach ? "" : "disabled"}>${iconCheck()} <span>${approved ? "السيرة معتمدة" : "اعتماد السيرة المحسنة"}</span></button>
           <button class="btn outline" data-search-approved-jobs ${approved ? "" : "disabled"}>${iconBolt()} البحث عن وظائف مناسبة</button>
         </div>
+        ${state.jobs.length ? `<form class="form" data-coach-target>
+          <div class="field">
+            <label for="coach-target-job">الوظيفة المستهدفة</label>
+            <select id="coach-target-job" name="job" required>
+              <option value="">اختر وظيفة من قائمتك</option>
+              ${state.jobs.map((job) => `<option value="${esc(job.id)}">${esc(job.title)} · ${esc(job.employer)}</option>`).join("")}
+            </select>
+          </div>
+          <button class="btn outline" type="submit" ${ready && signedIn && !state.jobWriterPending ? "" : "disabled"}>${iconSpark()} إنشاء سيرة لهذه الوظيفة باستخدام DeepSeek</button>
+        </form>` : `<button class="btn outline" data-nav="/jobs">اختيار وظيفة لتخصيص السيرة</button>`}
       </div>
     </section>`;
 }
@@ -2575,6 +2436,7 @@ const RESUME_COACH_ERRORS = {
   AI_BUSY: "مدرب السيرة مشغول الآن. حاول بعد قليل.",
   AI_TIMEOUT: "استغرق تحسين السيرة وقتاً أطول من المتوقع. حاول مرة أخرى.",
   AI_INVALID_DRAFT: "لم تكتمل مسودتا السيرة. حاول مرة أخرى.",
+  AI_UNAVAILABLE: "تعذر الاتصال بخدمة DeepSeek. حُفظ نص سيرتك. أعد المحاولة لاحقاً.",
   RESUME_CHANGED: "تغيّر نص السيرة أثناء التحسين. حسّن النص الحالي مرة أخرى.",
 };
 
@@ -2699,6 +2561,75 @@ function iconDot(tone) {
 }
 
 /* ---------------- Events ---------------- */
+async function generateJobKit(jobId, model = state.aiWriterModel) {
+  if (state.jobWriterPending) return;
+  if (!state.session?.authenticated || !originalResumeReady()) {
+    state.action = { pending: "", message: "", error: state.session?.authenticated
+      ? applicationErrorMessage("SOURCE_EVIDENCE_REQUIRED") : RESUME_COACH_ERRORS.AUTH_REQUIRED };
+    render();
+    return;
+  }
+  const job = jobById(jobId);
+  if (!job) return;
+  const account = state.session.user?.sub;
+  const profile = { ...approvedProfile(), target_job_brief: state.tailoringBriefs?.[jobId] || "" };
+  state.jobWriterPending = true;
+  const kit = await runAction(
+    "ghostwriter",
+    "جاري تجهيز كاتب الظل...",
+    "تم تجهيز السيرة والخطاب والمقابلة",
+    async () => {
+      const result = await apiJson("/api/ghostwriter", {
+        method: "POST",
+        body: JSON.stringify({
+          job,
+          profile,
+          ai_model: model,
+        }),
+      });
+      const current = approvedProfile();
+      if (account !== state.session.user?.sub || job.title !== jobById(jobId)?.title || job.employer !== jobById(jobId)?.employer
+          || profile.target_job_brief !== (state.tailoringBriefs?.[jobId] || "") || job.description !== jobById(jobId)?.description
+          || current.approved_master_resume !== profile.approved_master_resume || current.resume_text !== profile.resume_text) {
+        const error = new Error("Application context changed");
+        error.code = "JOB_CONTEXT_CHANGED";
+        throw error;
+      }
+      return result;
+    },
+    applicationErrorMessage,
+  );
+  state.jobWriterPending = false;
+  if (kit) {
+    state.ghostwriter[jobId] = kit;
+    state.approvedKits = { ...(state.approvedKits || {}), [jobId]: false };
+    state.assistantTab = "resume";
+    replaceJob({
+      ...job,
+      tailored_resume: kit.ar_resume || kit.en_resume || "",
+      cover_letter: kit.ar_cover_letter || kit.en_cover_letter || "",
+      status: job.status === "discovered" ? "processing" : job.status,
+    });
+    const packageRow = {
+      job_id: jobId,
+      resume_title: `Bilingual CV - ${job.title}`,
+      resume_body: `${kit.ar_resume}\n\n${kit.en_resume}`,
+      cover_letter_title: `Bilingual cover letter - ${job.employer}`,
+      cover_letter_body: `${kit.ar_cover_letter}\n\n${kit.en_cover_letter}`,
+      pdf_status: "جاهز للمراجعة",
+      generated_at: kit.generated_at,
+    };
+    state.packages = [packageRow, ...state.packages.filter((x) => x.job_id !== jobId)];
+    state.drafts = [
+      { job_id: jobId, content: ghostwriterText(kit), updated_at: kit.generated_at },
+      ...state.drafts.filter((x) => x.job_id !== jobId),
+    ];
+    saveLocalAiWriterState();
+    persistWorkState();
+  }
+  render();
+}
+
 function setupEvents() {
   document.querySelectorAll("[data-nav]").forEach((item) => {
     item.addEventListener("click", (e) => {
@@ -3094,70 +3025,16 @@ function setupEvents() {
   }
 
   document.querySelectorAll("[data-ghostwriter]").forEach((item) => {
-    item.addEventListener("click", async () => {
-      if (["ghostwriter", "kit-review"].includes(state.action.pending)) return;
-      if (!onboardingReady()) {
-        state.action = { pending: "", message: "", error: "Complete Profile and approve the master resume before generating application packages." };
-        render();
-        return;
-      }
-      const jobId = item.dataset.ghostwriter;
-      const job = jobById(jobId);
-      if (!job) return;
-      const profile = { ...approvedProfile(), target_job_brief: state.tailoringBriefs?.[jobId] || "" };
-      const kit = await runAction(
-        "ghostwriter",
-        "جاري تجهيز كاتب الظل...",
-        "تم تجهيز السيرة والخطاب والمقابلة",
-        async () => {
-          const result = await apiJson("/api/ghostwriter", {
-            method: "POST",
-            body: JSON.stringify({
-              job,
-              profile,
-              ai_model: state.aiWriterModel,
-            }),
-          });
-          const current = approvedProfile();
-          if (profile.target_job_brief !== (state.tailoringBriefs?.[jobId] || "") || job.description !== jobById(jobId)?.description
-              || current.approved_master_resume !== profile.approved_master_resume || current.resume_text !== profile.resume_text) {
-            const error = new Error("Application context changed");
-            error.code = "JOB_CONTEXT_CHANGED";
-            throw error;
-          }
-          return result;
-        },
-        applicationErrorMessage,
-      );
-      if (kit) {
-        state.ghostwriter[jobId] = kit;
-        state.approvedKits = { ...(state.approvedKits || {}), [jobId]: false };
-        state.assistantTab = "resume";
-        replaceJob({
-          ...job,
-          tailored_resume: (kit.ar_resume || kit.en_resume || "").slice(0, 360),
-          cover_letter: (kit.ar_cover_letter || kit.en_cover_letter || "").slice(0, 360),
-          status: job.status === "discovered" ? "processing" : job.status,
-        });
-        const packageRow = {
-          job_id: jobId,
-          resume_title: `Bilingual CV - ${job.title}`,
-          resume_body: `${kit.ar_resume}\n\n${kit.en_resume}`,
-          cover_letter_title: `Bilingual cover letter - ${job.employer}`,
-          cover_letter_body: `${kit.ar_cover_letter}\n\n${kit.en_cover_letter}`,
-          pdf_status: "جاهز للمراجعة",
-          generated_at: kit.generated_at,
-        };
-        state.packages = [packageRow, ...state.packages.filter((x) => x.job_id !== jobId)];
-        state.drafts = [
-          { job_id: jobId, content: ghostwriterText(kit), updated_at: kit.generated_at },
-          ...state.drafts.filter((x) => x.job_id !== jobId),
-        ];
-        saveLocalAiWriterState();
-        persistWorkState();
-      }
-      render();
-    });
+    item.addEventListener("click", () => generateJobKit(item.dataset.ghostwriter));
+  });
+
+  document.querySelector("[data-coach-target]")?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const jobId = new FormData(event.currentTarget).get("job");
+    if (!jobById(jobId) || state.jobWriterPending) return;
+    state.assistantTab = "resume";
+    navigate(`/jobs/${encodeURIComponent(jobId)}`);
+    generateJobKit(jobId, "deepseek");
   });
 
   document.querySelectorAll("[data-tailoring-brief]").forEach((item) => {
@@ -3210,9 +3087,26 @@ function setupEvents() {
     });
   });
 
+  document.querySelectorAll("[data-export-master]").forEach((item) => {
+    item.addEventListener("click", async () => {
+      if (!masterResumeReady()) return;
+      const language = item.dataset.exportMaster;
+      const body = state.masterResume?.[language];
+      if (!body) return;
+      await runAction("export-master", "", "", async () => {
+        const { buildDocx } = await import("./resume-docx.mjs");
+        const mime = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+        downloadBlob(new Blob([buildDocx(body, language)], { type: mime }), `${safeDownloadName(state.profile?.display_name)}-cv-${language}.docx`);
+        return true;
+      });
+      render();
+    });
+  });
+
   document.querySelectorAll("[data-export-kit]").forEach((item) => {
     item.addEventListener("click", async () => {
       const format = item.dataset.exportKit;
+      const documentType = item.dataset.exportDocument || "package";
       const jobId = item.dataset.jobId;
       const job = jobById(jobId);
       const kit = ghostwriterFor(jobId);
@@ -3225,7 +3119,7 @@ function setupEvents() {
           const file = await fetch("/api/export-package", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ format, job, profile: approvedProfile(), kit }),
+            body: JSON.stringify({ format, job, profile: approvedProfile(), kit, document: documentType }),
           });
           if (!file.ok) {
             const error = new Error("Application export failed");
@@ -3238,14 +3132,9 @@ function setupEvents() {
       );
       if (!response || !response.ok) return;
       const blob = await response.blob();
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = `${safeDownloadName(job.employer)}-${safeDownloadName(job.title)}.${format}`;
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      URL.revokeObjectURL(url);
+      const suffix = documentType === "package" ? "" : `-cv-${documentType.slice(0, 2)}`;
+      downloadBlob(blob, `${safeDownloadName(job.employer)}-${safeDownloadName(job.title)}${suffix}.${format}`);
+      render();
     });
   });
 
@@ -3344,38 +3233,6 @@ function setupEvents() {
     });
   });
 
-  document.querySelectorAll("[data-generate-package]").forEach((item) => {
-    item.addEventListener("click", async () => {
-      const jobId = item.dataset.generatePackage;
-      if (!state.session?.authenticated) {
-        const job = jobById(jobId);
-        if (!job) return;
-        const pkg = {
-          job_id: jobId,
-          resume_title: `سيرة مخصصة - ${job.title}`,
-          resume_body: `مسودة سيرة مبنية على السيرة المعتمدة لدور ${job.title} لدى ${job.employer}. راجع كل معلومة قبل التقديم.`,
-          cover_letter_title: `خطاب تقديم - ${job.employer}`,
-          cover_letter_body: `مسودة خطاب موجهة إلى ${job.employer} بناءً على السيرة المعتمدة والوصف الوظيفي.`,
-          pdf_status: "جاهزة للمراجعة",
-          generated_at: new Date().toISOString(),
-        };
-        state.packages = [pkg, ...state.packages.filter((x) => x.job_id !== pkg.job_id)];
-        persistWorkState();
-        state.action = { pending: "", message: "تم تجهيز الحزمة محلياً", error: "" };
-        render();
-        return;
-      }
-      const pkg = await runAction(
-        "package",
-        "جاري تجهيز الحزمة...",
-        "تم تجهيز الحزمة",
-        () => apiJson(`/api/packages/${jobId}/generate`, { method: "POST" }),
-      );
-      if (pkg) state.packages = [pkg, ...state.packages.filter((x) => x.job_id !== pkg.job_id)];
-      render();
-    });
-  });
-
   const resumeCoachButton = document.querySelector("[data-resume-coach]");
   if (resumeCoachButton) {
     resumeCoachButton.addEventListener("click", async () => {
@@ -3448,6 +3305,7 @@ function setupEvents() {
       const field = language === "ar" ? "ar_master_resume" : "en_master_resume";
       state.resumeCoach = { ...state.resumeCoach, [field]: e.target.value };
       state.approvedMasterResume = false;
+      document.querySelectorAll("[data-export-master]").forEach((button) => { button.disabled = true; });
       saveLocalAiWriterState();
     });
   });
@@ -3580,6 +3438,8 @@ function setupEvents() {
           approve.disabled = true;
           approve.querySelector("span").textContent = "اعتماد السيرة المحسنة";
           coach.querySelector("[data-search-approved-jobs]").disabled = true;
+          const targetButton = coach.querySelector("[data-coach-target] button");
+          if (targetButton) targetButton.disabled = !ready || !state.session?.authenticated || state.jobWriterPending;
           coach.querySelector("[data-resume-coach]").disabled = !ready || !state.session?.authenticated || state.resumeCoachPending;
         }
         saveLocalAiWriterState();
@@ -3587,66 +3447,11 @@ function setupEvents() {
     });
   });
 
-  document.querySelectorAll("[data-resume-file]").forEach((resumeFile) => {
-    resumeFile.addEventListener("change", async (e) => {
-      const file = e.target.files && e.target.files[0];
-      if (!file) return;
-      state.action = { pending: "resume-upload", message: "جاري قراءة السيرة...", error: "" };
-      render();
-      const text = await extractResumeFileText(file, (message) => {
-        state.action = { pending: "resume-upload", message, error: "" };
-        render();
-      }).catch((error) => {
-        const code = String(error?.message || "");
-        state.action = {
-          pending: "",
-          message: "",
-          error: code === "DOC_LEGACY_UNSUPPORTED"
-            ? "ملف DOC القديم غير مدعوم. احفظ السيرة بصيغة DOCX أو PDF ثم أعد رفعها."
-            : "تعذرت قراءة الملف. ارفع PDF أو DOCX أو الصق نص السيرة مباشرة.",
-        };
-        return "";
-      });
-      let secureFile = null;
-      if (state.session?.authenticated) {
-        try {
-          state.action = { pending: "resume-upload", message: "جاري تشفير ملف السيرة وحفظه بصورة خاصة...", error: "" };
-          render();
-          secureFile = await uploadResumeFile(file);
-        } catch (error) {
-          state.action = { pending: "", message: "", error: String(error?.message || "تعذر حفظ ملف السيرة بصورة مشفرة.") };
-        }
-      }
-      state.profile = {
-        ...(state.profile || {}),
-        resume_filename: file.name,
-        resume_text: text || "",
-      };
-      resetResumeCoach();
-      if (!readableResumeText(text)) {
-        state.profile = {
-          ...(state.profile || {}),
-          target_roles: "",
-          resume_skills: "",
-          resume_seniority: "",
-          resume_work_examples: "",
-          resume_text: text || "",
-        };
-        state.action = { pending: "", message: "", error: "لم أستطع قراءة نص واضح من الملف. جرّب PDF أو DOCX، أو الصق نص السيرة مباشرة. لملفات PDF المصوّرة سيعمل التعرف العربي والإنجليزي تلقائياً." };
-      } else {
-        applyResumeSignalsFromText(text);
-        saveLocalProfile(state.profile);
-        saveLocalAiWriterState();
-        state.action = {
-          pending: "",
-          message: secureFile
-            ? "تمت قراءة السيرة وحفظ الملف الأصلي مشفراً. راجع البيانات ثم استخدم السيرة للمطابقة."
-            : "تمت قراءة السيرة وتعبئة البيانات الأساسية. راجعها ثم اضغط استخدام السيرة للمطابقة.",
-          error: "",
-        };
-      }
-      render();
-    });
+  document.querySelectorAll("[data-resume-file]").forEach((input) => {
+    input.addEventListener("change", () => importProfileResume(input.files?.[0]));
+  });
+  document.querySelector("[data-reextract-resume]")?.addEventListener("click", () => {
+    if (state.session?.authenticated && state.resumeFile) importProfileResume(null, state.resumeFile);
   });
 
   const deleteResumeFile = document.querySelector("[data-delete-resume-file]");
@@ -3731,7 +3536,9 @@ function setupEvents() {
         render();
         return;
       }
-      applyResumeSignalsFromText(state.profile?.resume_text || "");
+      applyResumeSignalsFromText(state.profile?.resume_text || "", true);
+      state.masterResume = { ar: "", en: "", approved_at: new Date().toISOString() };
+      Object.keys(state.ghostwriter).forEach((jobId) => invalidateApplicationReview(jobId));
       state.approvedMasterResume = true;
       state.action = { pending: "", message: "تم اعتماد السيرة. سنعرض الآن الوظائف الأقرب لها فقط.", error: "" };
       saveLocalProfile(state.profile);
