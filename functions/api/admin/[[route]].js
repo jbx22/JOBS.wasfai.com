@@ -1,4 +1,5 @@
-import { adminJson, audit, ensureAdminSchema, requireAdmin, SERVICE_ADMIN_EMAIL, SUPER_ADMIN_EMAIL } from "../_admin.js";
+import { adminJson, audit, auditStatement, ensureAdminSchema, requireAdmin, SERVICE_ADMIN_EMAIL, SUPER_ADMIN_EMAIL } from "../_admin.js";
+import { adminWorkspace } from "../_admin_workspaces.js";
 import { DEEPSEEK_LABEL, deepseekModel } from "../_deepseek.js";
 import { moyasarInvoiceRecord, moyasarStatus } from "../_moyasar.js";
 import { ensureWorkspaceSchema, noContent } from "../_state.js";
@@ -13,6 +14,7 @@ export async function onRequest(context) {
   const parts = url.pathname.replace(/^\/api\/admin\/?/, "").split("/").filter(Boolean);
 
   try {
+    if (["workspaces", "recruitment", "support", "marketing", "accounting"].includes(parts[0])) return await adminWorkspace(context, parts, method);
     if (method === "GET" && !parts[0]) return await adminSession(context);
     if (method === "GET" && parts[0] === "overview") return await overview(context);
     if (method === "GET" && parts[0] === "users") return await users(context);
@@ -226,12 +228,15 @@ async function aiManagement(context) {
   const access = await requireAdmin(context);
   if (access.error) return access.error;
   const env = context.env || {};
-  const usage = await usageSummary(access.db);
+  const since = new Date(Date.now() - 30 * 86_400_000).toISOString().slice(0, 19).replace("T", " ");
+  const month = new Date().toISOString().slice(0, 7) + "-01 00:00:00";
+  const usage = await usageSummary(access.db, since);
+  const monthly = await usageSummary(access.db, month);
   const { results: byRoute = [] } = await access.db.prepare(`
     SELECT route, provider, model, COUNT(*) AS requests, COALESCE(SUM(cost_usd), 0) AS cost_usd,
       COALESCE(SUM(input_tokens + output_tokens), 0) AS tokens
-    FROM ai_usage GROUP BY route, provider, model ORDER BY cost_usd DESC LIMIT 50
-  `).all();
+    FROM ai_usage WHERE created_at >= ? GROUP BY route, provider, model ORDER BY cost_usd DESC LIMIT 50
+  `).bind(since).all();
   const { results: settings = [] } = await access.db.prepare("SELECT key, value, updated_at FROM ai_settings ORDER BY key").all();
   return adminJson({
     providers: [
@@ -240,26 +245,41 @@ async function aiManagement(context) {
       { id: "openrouter", label: "OpenRouter", configured: Boolean(env.OPENROUTER_API_KEY), model: env.MINIMAX_MODEL || env.OPENROUTER_MINIMAX_MODEL || "minimax/minimax-m3" },
     ],
     usage,
+    since,
+    month,
+    monthly,
     by_route: byRoute,
     settings: Object.fromEntries(settings.map((row) => [row.key, row.value])),
   });
 }
 
 async function updateAiSettings(context) {
-  const access = await requireAdmin(context, { superAdmin: true });
+  const access = await requireAdmin(context, { scope: "ai_controls" });
   if (access.error) return access.error;
   const body = await readBody(context);
-  const allowed = ["monthly_budget_usd", "default_provider", "per_user_daily_limit"];
-  const statements = [];
-  for (const key of allowed) {
-    if (body[key] === undefined) continue;
-    statements.push(access.db.prepare(`
-      INSERT INTO ai_settings(key, value, updated_by, updated_at) VALUES (?, ?, ?, CURRENT_TIMESTAMP)
-      ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_by=excluded.updated_by, updated_at=CURRENT_TIMESTAMP
-    `).bind(key, String(body[key]), access.admin.email));
+  const settings = {};
+  for (const [key, value] of Object.entries(body)) {
+    if (key === "default_provider" && ["luna", "deepseek", "openrouter"].includes(value)) {
+      settings[key] = value;
+      continue;
+    }
+    const number = Number(value);
+    if (["monthly_budget_usd", "per_user_daily_limit"].includes(key) &&
+      ["string", "number"].includes(typeof value) && String(value).trim() &&
+      Number.isFinite(number) && number >= 0 && number <= 100000 &&
+      (key !== "per_user_daily_limit" || Number.isInteger(number))) {
+      settings[key] = String(number);
+      continue;
+    }
+    throw new AuthError("INVALID_AI_SETTING", 400, "Enter a supported provider or a valid limit.");
   }
-  if (statements.length) await access.db.batch(statements);
-  await audit(context, access, "ai.settings_update", "ai_settings", "global", body);
+  const entries = Object.entries(settings);
+  if (!entries.length) throw new AuthError("INVALID_AI_SETTING", 400, "Enter at least one setting.");
+  const statements = entries.map(([key, value]) => access.db.prepare(`
+    INSERT INTO ai_settings(key, value, updated_by, updated_at) VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+    ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_by=excluded.updated_by, updated_at=CURRENT_TIMESTAMP
+  `).bind(key, value, access.admin.email));
+  await access.db.batch([...statements, auditStatement(context, access, "ai.settings_update", "ai_settings", "global", settings)]);
   return adminJson({ ok: true });
 }
 
@@ -284,7 +304,7 @@ function protectedAdmin(email) {
 }
 
 function adminTarget(db, target) {
-  return db.prepare(`SELECT email, role FROM admin_memberships
+  return db.prepare(`SELECT email, role, scopes FROM admin_memberships
     WHERE email = ? OR user_id = ? ORDER BY CASE WHEN email = ? THEN 0 ELSE 1 END LIMIT 1`)
     .bind(target.toLowerCase(), target, target.toLowerCase()).first();
 }
@@ -309,14 +329,15 @@ async function createAdmin(context) {
   const role = body.role ?? "admin";
   if (!["admin", "super_admin"].includes(role)) return adminJson({ error: "Select a valid role.", code: "BAD_ROLE" }, 400);
   if (adminChangeBlocked(access, { email }, role)) return protectedAdminResponse();
+  const scopes = scopesFor(role, body.scopes);
   const displayName = String(body.display_name || email.split("@")[0]).trim().slice(0, 120);
   const result = await access.db.prepare(`
     INSERT INTO admin_memberships(user_id, email, display_name, role, status, scopes, created_by)
     VALUES (?, ?, ?, ?, 'active', ?, ?)
     ON CONFLICT(email) DO NOTHING
-  `).bind(`email:${email}`, email, displayName, role, scopesFor(role), access.admin.email).run();
+  `).bind(`email:${email}`, email, displayName, role, scopes, access.admin.email).run();
   if (!result.meta.changes) return adminJson({ error: "This administrator already exists. Edit their existing record.", code: "ADMIN_EXISTS" }, 409);
-  await audit(context, access, "admin.create", "admin", email, { role });
+  await audit(context, access, "admin.create", "admin", email, { role, scopes: JSON.parse(scopes) });
   return adminJson({ ok: true, email, role }, 201);
 }
 
@@ -331,12 +352,13 @@ async function updateAdmin(context, id) {
   const target = await adminTarget(access.db, decodeURIComponent(id));
   if (!target) return adminJson({ error: "Administrator was not found.", code: "ADMIN_NOT_FOUND" }, 404);
   if (adminChangeBlocked(access, target, role)) return protectedAdminResponse();
+  const scopes = scopesFor(role, body.scopes, target.role === role ? target.scopes : undefined);
   const result = await access.db.prepare(`
     UPDATE admin_memberships SET role = ?, status = ?, scopes = ?, revoked_at = CASE WHEN ? = 'revoked' THEN CURRENT_TIMESTAMP ELSE NULL END
-    WHERE email = ? AND role = ?
-  `).bind(role, status, scopesFor(role), status, target.email, target.role).run();
+    WHERE email = ? AND role = ? AND scopes = ?
+  `).bind(role, status, scopes, status, target.email, target.role, target.scopes).run();
   if (!result.meta.changes) return adminJson({ error: "Administrator changed. Refresh and try again.", code: "ADMIN_CHANGED" }, 409);
-  await audit(context, access, "admin.update", "admin", target.email, { role, status });
+  await audit(context, access, "admin.update", "admin", target.email, { role, status, scopes: JSON.parse(scopes) });
   return adminJson({ ok: true, id: target.email, role, status });
 }
 
@@ -364,12 +386,12 @@ async function ensureUserTable(db) {
   `).run();
 }
 
-async function usageSummary(db) {
+async function usageSummary(db, since = "") {
   const row = await db.prepare(`
     SELECT COUNT(*) AS requests, COALESCE(SUM(input_tokens), 0) AS input_tokens,
       COALESCE(SUM(output_tokens), 0) AS output_tokens, COALESCE(SUM(cost_usd), 0) AS cost_usd
-    FROM ai_usage
-  `).first();
+    FROM ai_usage WHERE created_at >= ?
+  `).bind(since).first();
   return {
     requests: Number(row?.requests || 0),
     input_tokens: Number(row?.input_tokens || 0),
@@ -435,8 +457,16 @@ function cleanDate(value) {
   return /^\d{4}-\d{2}-\d{2}$/.test(text) ? text : null;
 }
 
-function scopesFor(role) {
-  return role === "super_admin"
-    ? '["owner","admins","users","subscribers","jobs","sources","ai","billing","audit","settings"]'
-    : '["users","subscribers","jobs","sources","ai","reports"]';
+const STANDARD_SCOPES = ["reports", "users", "employers", "jobs", "support", "subscribers", "billing", "accounting", "ai", "ai_controls", "marketing", "sources"];
+const LEGACY_SCOPES = '["users","subscribers","jobs","sources","ai","reports"]';
+
+function scopesFor(role, selection, existing) {
+  if (role === "super_admin") return JSON.stringify([...STANDARD_SCOPES, "owner", "admins", "audit", "settings"]);
+  if (selection === undefined) return existing || LEGACY_SCOPES;
+  if (!Array.isArray(selection) || selection.some((scope) => !STANDARD_SCOPES.includes(scope))) {
+    throw new AuthError("BAD_SCOPES", 400, "Choose valid administrator permissions.");
+  }
+  const scopes = [...new Set(selection)];
+  if (scopes.includes("ai_controls") && !scopes.includes("ai")) scopes.push("ai");
+  return JSON.stringify(scopes);
 }

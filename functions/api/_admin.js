@@ -162,23 +162,31 @@ export async function requireAdmin(context, options = {}) {
   return { db, session, admin: { ...member, user_id: session.sub, email, display_name: session.name || member.display_name || "" } };
 }
 
+export function auditStatement(context, access, action, resourceType, resourceId = "", metadata = {}, guard) {
+  const values = [
+    access.admin.user_id || access.session.sub || "",
+    access.admin.email || access.session.email || "",
+    access.admin.role || "",
+    action,
+    resourceType,
+    String(resourceId || ""),
+    JSON.stringify(access.operatorEmail ? { ...metadata, central_operator: access.operatorEmail } : metadata),
+    context.request.headers.get("CF-Connecting-IP") || "",
+    String(context.request.headers.get("User-Agent") || "").slice(0, 240),
+  ];
+  // Guard identifiers are supplied by internal workspace handlers. The operation ID
+  // links the audit row to the winning write in the same transaction.
+  if (guard) values.push(guard.id, guard.operation);
+  const condition = guard ? ` WHERE EXISTS (SELECT 1 FROM ${guard.table} WHERE ${guard.key} = ? AND operation_id = ?)` : "";
+  return access.db.prepare(`
+    INSERT INTO audit_logs (actor_id, actor_email, actor_role, action, resource_type, resource_id, metadata, ip, user_agent)
+    SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?${condition}
+  `).bind(...values);
+}
+
 export async function audit(context, access, action, resourceType, resourceId = "", metadata = {}) {
   try {
-    await ensureAdminSchema(access.db);
-    await access.db.prepare(`
-      INSERT INTO audit_logs (actor_id, actor_email, actor_role, action, resource_type, resource_id, metadata, ip, user_agent)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).bind(
-      access.admin.user_id || access.session.sub || "",
-      access.admin.email || access.session.email || "",
-      access.admin.role || "",
-      action,
-      resourceType,
-      String(resourceId || ""),
-      JSON.stringify(access.operatorEmail ? { ...metadata, central_operator: access.operatorEmail } : metadata),
-      context.request.headers.get("CF-Connecting-IP") || "",
-      String(context.request.headers.get("User-Agent") || "").slice(0, 240),
-    ).run();
+    await auditStatement(context, access, action, resourceType, resourceId, metadata).run();
   } catch (error) {
     console.error("Admin audit write failed", { action, resourceType, name: error?.name });
   }

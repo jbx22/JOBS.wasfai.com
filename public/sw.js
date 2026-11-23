@@ -1,4 +1,4 @@
-const CACHE_NAME = "jobs-wasfai-v71";
+const CACHE_NAME = "jobs-wasfai-v72";
 const APP_SHELL = [
   "/",
   "/app",
@@ -7,8 +7,9 @@ const APP_SHELL = [
   "/admin/",
   "/super-admin/",
   "/pricing/",
-  "/admin.css",
-  "/admin.js?v=jobs71",
+  "/admin.css?v=jobs72",
+  "/admin-workspaces.js?v=jobs72",
+  "/admin.js?v=jobs72",
   "/pricing.css",
   "/pricing.js?v=jobs62",
   "/offline.html",
