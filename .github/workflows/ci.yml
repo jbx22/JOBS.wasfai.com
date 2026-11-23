@@ -35,8 +35,8 @@ jobs:
       - run: npm install --prefix vps/db-gateway --ignore-scripts --no-audit --no-fund
       - run: npm run check:all
       - run: node --test vps/db-gateway/test/sql.test.mjs
-      - name: Compile Pages Functions
-        run: npx wrangler pages functions build functions --outdir .ci-build --compatibility-date 2026-07-11 --compatibility-flags nodejs_compat
+      - name: Build the Pages upload
+        run: bash .github/scripts/stage-pages.sh
 
   deploy:
     name: Deploy Cloudflare Pages
@@ -71,6 +71,9 @@ jobs:
           else
             echo "::notice::Skipping this commit because main has advanced to $main_sha."
           fi
+      - name: Stage the tested commit
+        if: steps.current.outputs.deploy == 'true'
+        run: bash .github/scripts/stage-pages.sh
       - name: Publish the tested commit
         if: steps.current.outputs.deploy == 'true'
         env:
@@ -79,7 +82,13 @@ jobs:
         run: |
           : "${CLOUDFLARE_API_TOKEN:?Configure CLOUDFLARE_API_TOKEN for production}"
           : "${CLOUDFLARE_ACCOUNT_ID:?Configure CLOUDFLARE_ACCOUNT_ID for production}"
-          ./node_modules/.bin/wrangler pages deploy public --project-name jobs-wasfai --branch main --commit-hash "$GITHUB_SHA"
+          node .github/scripts/pages-bindings.mjs before
+          (
+            cd "$PAGES_STAGE"
+            "$GITHUB_WORKSPACE/node_modules/.bin/wrangler" pages deploy site --no-bundle \
+              --project-name jobs-wasfai --branch main --commit-hash "$GITHUB_SHA"
+          )
+          node .github/scripts/pages-bindings.mjs after
       - name: Verify the public release
         if: steps.current.outputs.deploy == 'true'
         run: |
