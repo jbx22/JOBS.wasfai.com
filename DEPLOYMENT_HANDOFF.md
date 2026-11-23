@@ -251,3 +251,12 @@ Worker, otherwise account storage reports `STORAGE_NOT_CONFIGURED`.
 Pages env var that is **not** declared there is pruned by the next
 `wrangler pages deploy`. `JOBS_DB_GATEWAY_TOKEN` stays a dashboard secret and is
 preserved by deploys.
+
+## jobs73 database release
+
+1. Update the PostgreSQL gateway service to the `jobs73` source. The gateway accepts larger bound data while keeping a separate 32 KiB SQL statement limit. PostgreSQL statement timeout is applied when each connection opens.
+2. Deploy the Pages Functions from the same release after the gateway returns a healthy database result. The runtime creates the additive `jobs_user_write_guards` table with the existing application role. The workspace and billing write paths use this table to serialize competing writes per account. Existing workspace documents and payment records require no backfill.
+3. Install the updated daily backup script on the VPS and confirm the resulting encrypted archive restores in an isolated PostgreSQL database.
+4. Verify a fresh workspace save, a two-tab conflict, and a subscription update in staging. Run payment verification against a staging payment order and check that replay leaves the subscription expiry unchanged.
+
+The prior gateway understands the transaction SQL, but still applies its 32 KiB total request limit. Keep PostgreSQL and the current gateway configuration when rolling back the Pages release.

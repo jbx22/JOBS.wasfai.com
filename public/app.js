@@ -581,31 +581,55 @@ function workspacePayload() {
   };
 }
 
-let saveWorkspaceTimer = null;
+let saveWorkspaceTimer;
+let workspaceSaving = false;
+let workspaceSaveQueued = false;
+
 function saveWorkspaceState() {
   if (!state.session?.authenticated) return;
   clearTimeout(saveWorkspaceTimer);
   state.persistence = { ...(state.persistence || {}), pending: true };
-  saveWorkspaceTimer = setTimeout(async () => {
-    try {
-      const response = await fetch("/api/me/state", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ state: workspacePayload(), revisions: state.__revisions || {} }),
-      });
-      if (response.ok) {
-        const payload = await response.json();
-        state.__revisions = payload.state?.__revisions || state.__revisions || {};
-        state.persistence = { storage: "d1-normalized", pending: false, last_saved_at: new Date().toISOString() };
-      } else if (response.status === 409) {
-        state.persistence = { storage: "conflict", pending: false, last_saved_at: state.persistence?.last_saved_at || "" };
-        state.action = { pending: "", message: "", error: "Your workspace changed in another tab. Reload before saving." };
-        render();
-      }
-    } catch {
-      state.persistence = { ...(state.persistence || {}), pending: false };
+  saveWorkspaceTimer = setTimeout(flushWorkspaceState, 500);
+}
+
+async function flushWorkspaceState() {
+  if (!state.session?.authenticated) return;
+  if (workspaceSaving) {
+    workspaceSaveQueued = true;
+    return;
+  }
+  workspaceSaving = true;
+  let conflict = false;
+  try {
+    const response = await fetch("/api/me/state", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ state: workspacePayload(), revisions: state.__revisions || {} }),
+    });
+    if (response.ok) {
+      const payload = await response.json();
+      state.__revisions = payload.state?.__revisions || state.__revisions || {};
+      state.persistence = { storage: payload.storage || "postgres-normalized", pending: false, last_saved_at: new Date().toISOString() };
+    } else {
+      conflict = response.status === 409;
+      showWorkspaceSaveError(conflict);
     }
-  }, 500);
+  } catch {
+    showWorkspaceSaveError(false);
+  } finally {
+    workspaceSaving = false;
+    if (workspaceSaveQueued && !conflict) saveWorkspaceState();
+    workspaceSaveQueued = false;
+  }
+}
+
+function showWorkspaceSaveError(conflict) {
+  state.persistence = { ...state.persistence, storage: conflict ? "conflict" : "save-failed", pending: false };
+  const error = conflict
+    ? "تغيرت مساحة العمل في جلسة أخرى. حدّث الصفحة قبل الحفظ."
+    : "تعذر حفظ مساحة العمل. تعديلاتك ما زالت مفتوحة في هذه الصفحة.";
+  state.action = { pending: "", message: "", error };
+  render();
 }
 
 async function loadWorkspaceState() {
@@ -1574,7 +1598,7 @@ function renderCommandHome() {
       </div>
       <div class="persistence-note">
         <span>${state.session?.authenticated ? esc(tr("signedWorkspace")) : esc(tr("guestWorkspace"))}</span>
-        <span>${state.persistence?.pending ? esc(tr("saving")) : state.persistence?.storage === "d1" ? esc(tr("durable")) : esc(tr("local"))}</span>
+        <span>${state.persistence?.pending ? esc(tr("saving")) : /^(postgres|d1)(-|$)/.test(state.persistence?.storage || "") ? esc(tr("durable")) : esc(tr("local"))}</span>
       </div>
     </section>`,
     { screen: "search" },

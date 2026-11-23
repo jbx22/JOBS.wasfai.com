@@ -71,6 +71,7 @@ class GatewayDatabase {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), GATEWAY_TIMEOUT_MS);
     let response;
+    let payload;
     try {
       response = await fetch(`${this.config.url}${path}`, {
         method: "POST",
@@ -81,20 +82,14 @@ class GatewayDatabase {
         body: JSON.stringify(body),
         signal: controller.signal,
       });
+      payload = await response.json().catch(() => null);
     } catch (error) {
-      throw new Error(`database gateway unreachable: ${error?.message || error}`);
+      throw new Error("Database gateway is unavailable.", { cause: error });
     } finally {
       clearTimeout(timer);
     }
-    let payload = null;
-    try {
-      payload = await response.json();
-    } catch {
-      payload = null;
-    }
     if (!response.ok || !payload?.ok) {
-      const message = payload?.error || `database gateway error (HTTP ${response.status})`;
-      const failure = new Error(message);
+      const failure = new Error(payload?.error || `Database gateway returned HTTP ${response.status}.`);
       failure.code = payload?.code || "DATABASE_ERROR";
       failure.status = response.status;
       throw failure;
@@ -129,4 +124,26 @@ export function getJobDb(env) {
   const config = ensureConfigured(env);
   if (!config) return null;
   return new GatewayDatabase(config);
+}
+
+const WRITE_GUARD_CONSTRAINT = "jobs_user_write_consistency";
+export const USER_WRITE_GUARDS_SCHEMA = `CREATE TABLE IF NOT EXISTS jobs_user_write_guards (
+  user_id TEXT PRIMARY KEY, consistent INTEGER NOT NULL DEFAULT 1,
+  CONSTRAINT ${WRITE_GUARD_CONSTRAINT} CHECK (consistent = 1)
+)`;
+
+export function isWriteConflict(error) {
+  return error?.code === "DB_WRITE_CONFLICT" || String(error?.message || "").includes(WRITE_GUARD_CONSTRAINT);
+}
+
+export async function guardedUserBatch(db, userId, condition, params, statements) {
+  // PostgreSQL holds the row lock until commit. The named CHECK rolls back all
+  // writes if the caller's snapshot no longer matches once it has the lock.
+  return db.batch([
+    db.prepare(`INSERT INTO jobs_user_write_guards (user_id) VALUES (?)
+      ON CONFLICT(user_id) DO UPDATE SET consistent = 1`).bind(userId),
+    db.prepare(`UPDATE jobs_user_write_guards SET consistent = CASE WHEN (${condition}) THEN 1 ELSE 0 END
+      WHERE user_id = ?`).bind(...params, userId),
+    ...statements,
+  ]);
 }

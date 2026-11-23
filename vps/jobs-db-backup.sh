@@ -6,7 +6,8 @@
 #   Failure visibility: non-zero exit + explicit FAILED marker in the log.
 #
 # Installed at /usr/local/bin/jobs-db-backup.sh and scheduled from /etc/crontab.
-set -u
+set -uo pipefail
+umask 077
 ACC="20af8653055a0b9e99aa4a30e346f3d4"
 BUCKET="vps-backups"
 PREFIX="jobs-db-backups"
@@ -15,7 +16,7 @@ export AWS_EC2_METADATA_DISABLED=true
 
 PG="jobs-postgres"
 DB="jobs"
-DB_BACKUP_DIR="/root/jobs-backups"
+DB_BACKUP_DIR="${JOBS_BACKUP_DIR:-/root/jobs-backups}"
 RETENTION_LOCAL_DAYS=14
 RETENTION_R2_DAYS=30
 PASSPHRASE_FILE="/root/jobs-backup-passphrase"
@@ -30,12 +31,23 @@ chmod 700 "$DB_BACKUP_DIR"
 docker inspect "$PG" >/dev/null 2>&1 || fail "container $PG not found"
 
 DUMP="$DB_BACKUP_DIR/pg_dump-${DB}-${TS}.sql.gz"
+TEMP_DUMP="$(mktemp "$DB_BACKUP_DIR/.pg_dump-${DB}-${TS}.XXXXXX")" || fail "cannot create a temporary dump file"
+TEMP_LOG=""
+cleanup() {
+  rm -f -- "$TEMP_DUMP"
+  if [ -n "$TEMP_LOG" ]; then rm -f -- "$TEMP_LOG"; fi
+}
+trap cleanup EXIT
+TEMP_LOG="$(mktemp "$DB_BACKUP_DIR/.pg_dump-${DB}-${TS}.log.XXXXXX")" || fail "cannot create a temporary dump log"
 echo "[$STAMP] dumping ${DB} from ${PG}"
-if ! docker exec "$PG" pg_dump -U jobs -d "$DB" --no-owner --no-privileges 2>/tmp/jobs-pg.err \
-  | gzip > "$DUMP"; then
-  fail "pg_dump failed: $(tail -2 /tmp/jobs-pg.err)"
+if ! docker exec "$PG" pg_dump -U jobs -d "$DB" --no-owner --no-privileges 2>"$TEMP_LOG" \
+  | gzip > "$TEMP_DUMP"; then
+  fail "pg_dump failed: $(tail -2 "$TEMP_LOG")"
 fi
-[ -s "$DUMP" ] || fail "empty dump"
+if [ ! -s "$TEMP_DUMP" ] || ! gzip -t "$TEMP_DUMP"; then
+  fail "dump archive is empty or corrupt"
+fi
+mv -- "$TEMP_DUMP" "$DUMP" || fail "cannot finalize the local dump"
 echo "[$STAMP] dump size: $(du -h "$DUMP" | cut -f1)"
 
 # --- off-site: encrypt + upload -------------------------------------------------

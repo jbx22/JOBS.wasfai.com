@@ -1,6 +1,6 @@
 import { readActiveSession } from "./auth/_auth.js";
 import { buildBootstrap } from "./bootstrap.js";
-import { getJobDb } from "./_db.js";
+import { getJobDb, guardedUserBatch, isWriteConflict, USER_WRITE_GUARDS_SCHEMA } from "./_db.js";
 
 const TABLE_SQL = `
 CREATE TABLE IF NOT EXISTS user_states (
@@ -88,23 +88,20 @@ export async function readUserState(db, user) {
 export async function writeUserState(db, user, incoming, options = {}) {
   await ensureWorkspaceSchema(db);
   const state = sanitizeState(incoming, buildInitialState(user));
-  const expected = options.expectedRevisions || null;
-  const { results: currentRows = [] } = await db.prepare(
+  const expected = options.expectedRevisions;
+  const { results: rows = [] } = await db.prepare(
     "SELECT document_key, revision, payload FROM user_state_documents WHERE user_id = ?",
   ).bind(user.sub).all();
-  const current = Object.fromEntries(currentRows.map((row) => [row.document_key, Number(row.revision || 1)]));
-  const changedKeys = STATE_KEYS.filter((key) => {
-    const row = currentRows.find((item) => item.document_key === key);
-    return !row || row.payload !== JSON.stringify(state[key] ?? null);
-  });
-  if (expected) {
-    const conflict = changedKeys.find((key) => current[key] && Number(expected[key] || 0) !== current[key]);
-    if (conflict) {
-      const error = new Error(`Workspace document changed in another tab: ${conflict}`);
-      error.code = "STATE_CONFLICT";
-      throw error;
-    }
+  const current = new Map(rows.map((row) => [row.document_key, row]));
+  const changedKeys = STATE_KEYS.filter((key) => current.get(key)?.payload !== JSON.stringify(state[key] ?? null));
+  if (expected && changedKeys.some((key) => Number(expected[key] || 0) !== Number(current.get(key)?.revision || 0))) {
+    throw workspaceConflict();
   }
+
+  const revisions = Object.fromEntries(rows.filter(({ document_key }) => STATE_KEYS.includes(document_key))
+    .map(({ document_key, revision }) => [document_key, Number(revision)]));
+  if (!changedKeys.length) return { ...state, __revisions: revisions };
+
   const statements = changedKeys.map((key) => db.prepare(
     `INSERT INTO user_state_documents (user_id, document_key, payload, revision, updated_at)
      VALUES (?, ?, ?, 1, CURRENT_TIMESTAMP)
@@ -113,19 +110,36 @@ export async function writeUserState(db, user, incoming, options = {}) {
        revision = user_state_documents.revision + 1,
        updated_at = CURRENT_TIMESTAMP`,
   ).bind(user.sub, key, JSON.stringify(state[key] ?? null)));
-  if (statements.length) await db.batch(statements);
-  const domainStatements = buildDomainStatements(db, user.sub, state, changedKeys);
-  if (domainStatements.length) await db.batch(domainStatements);
-  // The legacy blob remains an untouched migration/rollback copy once the
-  // normalized documents exist. New accounts receive a one-time snapshot.
-  await db.prepare(
+
+  const matching = rows.map(() => "(document_key = ? AND revision = ?)").join(" OR ");
+  const condition = `(SELECT COUNT(*) FROM user_state_documents WHERE user_id = ?) = ?
+    ${matching ? `AND NOT EXISTS (
+      SELECT 1 FROM user_state_documents WHERE user_id = ? AND NOT (${matching})
+    )` : ""}`;
+  const params = [user.sub, rows.length];
+  if (matching) params.push(user.sub, ...rows.flatMap(({ document_key, revision }) => [document_key, revision]));
+  // The legacy blob stays a migration snapshot. Keep its first insert and all
+  // relational projections in the same commit as the normalized documents.
+  const legacy = db.prepare(
     `INSERT OR IGNORE INTO user_states (user_id, email, payload, updated_at)
      VALUES (?, ?, ?, CURRENT_TIMESTAMP)`,
-  ).bind(user.sub, user.email || "", JSON.stringify(state)).run();
-  const { results: revisions = [] } = await db.prepare(
-    "SELECT document_key, revision FROM user_state_documents WHERE user_id = ?",
-  ).bind(user.sub).all();
-  return { ...state, __revisions: Object.fromEntries(revisions.map((row) => [row.document_key, Number(row.revision || 1)])) };
+  ).bind(user.sub, user.email || "", JSON.stringify(state));
+  try {
+    await guardedUserBatch(db, user.sub, condition, params, [
+      ...statements, ...buildDomainStatements(db, user.sub, state, changedKeys), legacy,
+    ]);
+  } catch (error) {
+    if (isWriteConflict(error)) throw workspaceConflict();
+    throw error;
+  }
+  for (const key of changedKeys) revisions[key] = (revisions[key] || 0) + 1;
+  return { ...state, __revisions: revisions };
+}
+
+function workspaceConflict() {
+  const error = new Error("Workspace changed in another session. Reload before saving.");
+  error.code = "STATE_CONFLICT";
+  return error;
 }
 
 export function buildInitialState(user = {}) {
@@ -180,9 +194,9 @@ export function upsertSourceState(state, source) {
 }
 
 export async function ensureWorkspaceSchema(db) {
-  await db.prepare(TABLE_SQL).run();
-  await db.prepare(DOCUMENT_TABLE_SQL).run();
-  for (const sql of DOMAIN_TABLES_SQL) await db.prepare(sql).run();
+  await db.batch([
+    TABLE_SQL, DOCUMENT_TABLE_SQL, USER_WRITE_GUARDS_SCHEMA, ...DOMAIN_TABLES_SQL,
+  ].map((sql) => db.prepare(sql)));
 }
 
 function buildDomainStatements(db, userId, state, changedKeys) {

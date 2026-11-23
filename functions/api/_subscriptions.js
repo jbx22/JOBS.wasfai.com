@@ -1,4 +1,5 @@
 import { moyasarInvoiceRecord } from "./_moyasar.js";
+import { guardedUserBatch, isWriteConflict, USER_WRITE_GUARDS_SCHEMA } from "./_db.js";
 
 export const SUBSCRIPTION_PLANS = [
   {
@@ -86,7 +87,8 @@ export function planById(id) {
 }
 
 export async function ensureSubscriptionSchema(db) {
-  await db.prepare(`
+  await db.batch([
+    `
     CREATE TABLE IF NOT EXISTS subscriptions (
       user_id TEXT PRIMARY KEY,
       plan TEXT NOT NULL DEFAULT 'free',
@@ -96,8 +98,8 @@ export async function ensureSubscriptionSchema(db) {
       updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     )
-  `).run();
-  await db.prepare(`
+  `,
+    `
     CREATE TABLE IF NOT EXISTS subscription_payments (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       user_id TEXT NOT NULL,
@@ -115,10 +117,10 @@ export async function ensureSubscriptionSchema(db) {
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     )
-  `).run();
-  await db.prepare("CREATE INDEX IF NOT EXISTS idx_subscription_payments_user ON subscription_payments(user_id, created_at)").run();
-  await db.prepare("CREATE INDEX IF NOT EXISTS idx_subscription_payments_invoice ON subscription_payments(provider_invoice_id)").run();
-  await db.prepare(`
+  `,
+    "CREATE INDEX IF NOT EXISTS idx_subscription_payments_user ON subscription_payments(user_id, created_at)",
+    "CREATE INDEX IF NOT EXISTS idx_subscription_payments_invoice ON subscription_payments(provider_invoice_id)",
+    `
     CREATE TABLE IF NOT EXISTS payment_events (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       provider TEXT NOT NULL DEFAULT 'moyasar',
@@ -128,8 +130,11 @@ export async function ensureSubscriptionSchema(db) {
       raw_payload TEXT NOT NULL DEFAULT '{}',
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     )
-  `).run();
-  await db.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_payment_events_object ON payment_events(provider, provider_object_id) WHERE provider_object_id <> ''").run();
+  `,
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_payment_events_object ON payment_events(provider, provider_object_id) WHERE provider_object_id <> ''",
+    USER_WRITE_GUARDS_SCHEMA,
+    PAYMENT_ACTIVATIONS_SCHEMA,
+  ].map((sql) => db.prepare(sql)));
 }
 
 export function nextPeriodEnd(billing) {
@@ -162,30 +167,42 @@ export async function activatePaidSubscription(db, userId, plan, invoice, status
     error.code = "PAYMENT_VERIFICATION_FAILED";
     throw error;
   }
-  await db.prepare(PAYMENT_ACTIVATIONS_SCHEMA).run();
-  const previous = await db.prepare("SELECT invoice_id FROM payment_activations WHERE invoice_id=?").bind(invoice.id).first();
-  if (previous) return { activated: false, already_activated: true };
-  const current = await db.prepare("SELECT plan, status, current_period_end FROM subscriptions WHERE user_id=?").bind(userId).first();
-  const currentEnd = current?.plan === plan.id && current?.status === "active" ? new Date(current.current_period_end).getTime() : 0;
-  const periodEnd = new Date(Math.max(Date.now(), Number.isFinite(currentEnd) ? currentEnd : 0) + (plan.billing === "yearly" ? 365 : 30) * 86400000).toISOString().slice(0, 10);
-  const activationId = crypto.randomUUID();
-  await db.batch([
-    db.prepare("INSERT INTO payment_activations(invoice_id, user_id, plan, activation_id) VALUES (?, ?, ?, ?) ON CONFLICT(invoice_id) DO NOTHING")
-      .bind(invoice.id, userId, plan.id, activationId),
-    db.prepare(`
-      INSERT INTO subscriptions(user_id, plan, status, ai_monthly_limit_usd, current_period_end, updated_at)
-      SELECT ?, ?, ?, ?, ?, CURRENT_TIMESTAMP
-      WHERE EXISTS (SELECT 1 FROM payment_activations WHERE invoice_id=? AND activation_id=?)
-      ON CONFLICT(user_id) DO UPDATE SET plan=excluded.plan, status=excluded.status,
-        ai_monthly_limit_usd=excluded.ai_monthly_limit_usd, current_period_end=excluded.current_period_end,
-        updated_at=CURRENT_TIMESTAMP
-    `).bind(userId, plan.id, status, plan.ai_monthly_limit_usd, periodEnd, invoice.id, activationId),
-    db.prepare(`UPDATE subscription_payments SET status=?, provider_payment_id=?, raw_payload=?, updated_at=CURRENT_TIMESTAMP
-      WHERE provider_invoice_id=? AND user_id=?`)
-      .bind(invoice.status, invoice.payments?.[0]?.id || "", JSON.stringify(moyasarInvoiceRecord(invoice)), invoice.id, userId),
-  ]);
-  const activation = await db.prepare("SELECT activation_id FROM payment_activations WHERE invoice_id=?").bind(invoice.id).first();
-  return { activated: activation?.activation_id === activationId, already_activated: activation?.activation_id !== activationId };
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    const previous = await db.prepare("SELECT invoice_id FROM payment_activations WHERE invoice_id=?").bind(invoice.id).first();
+    if (previous) return { activated: false, already_activated: true };
+    const current = await db.prepare("SELECT plan, status, current_period_end FROM subscriptions WHERE user_id=?").bind(userId).first();
+    const currentEnd = current?.plan === plan.id && current.status === "active" ? Date.parse(current.current_period_end) : 0;
+    const periodEnd = new Date(Math.max(Date.now(), Number.isFinite(currentEnd) ? currentEnd : 0) +
+      (plan.billing === "yearly" ? 365 : 30) * 86400000).toISOString().slice(0, 10);
+    const condition = current
+      ? "EXISTS (SELECT 1 FROM subscriptions WHERE user_id = ? AND plan = ? AND status = ? AND COALESCE(current_period_end, '') = ?)"
+      : "NOT EXISTS (SELECT 1 FROM subscriptions WHERE user_id = ?)";
+    const params = current ? [userId, current.plan, current.status, current.current_period_end || ""] : [userId];
+    const activationId = crypto.randomUUID();
+    try {
+      const [, , activation] = await guardedUserBatch(db, userId, condition, params, [
+        db.prepare("INSERT INTO payment_activations(invoice_id, user_id, plan, activation_id) VALUES (?, ?, ?, ?) ON CONFLICT(invoice_id) DO NOTHING")
+          .bind(invoice.id, userId, plan.id, activationId),
+        db.prepare(`
+          INSERT INTO subscriptions(user_id, plan, status, ai_monthly_limit_usd, current_period_end, updated_at)
+          SELECT ?, ?, ?, ?, ?, CURRENT_TIMESTAMP
+          WHERE EXISTS (SELECT 1 FROM payment_activations WHERE invoice_id=? AND activation_id=?)
+            AND NOT EXISTS (SELECT 1 FROM subscription_payments WHERE provider_invoice_id=? AND user_id=? AND status='paid_manual')
+          ON CONFLICT(user_id) DO UPDATE SET plan=excluded.plan, status=excluded.status,
+            ai_monthly_limit_usd=excluded.ai_monthly_limit_usd, current_period_end=excluded.current_period_end,
+            updated_at=CURRENT_TIMESTAMP
+        `).bind(userId, plan.id, status, plan.ai_monthly_limit_usd, periodEnd, invoice.id, activationId, invoice.id, userId),
+        db.prepare(`UPDATE subscription_payments SET status=?, provider_payment_id=?, raw_payload=?, updated_at=CURRENT_TIMESTAMP
+          WHERE provider_invoice_id=? AND user_id=?
+            AND EXISTS (SELECT 1 FROM payment_activations WHERE invoice_id=? AND activation_id=?)`)
+          .bind(invoice.status, invoice.payments?.[0]?.id || "", JSON.stringify(moyasarInvoiceRecord(invoice)), invoice.id, userId, invoice.id, activationId),
+      ]);
+      const activated = Number(activation?.meta?.changes || 0) === 1;
+      return { activated, already_activated: !activated };
+    } catch (error) {
+      if (attempt === 3 || !isWriteConflict(error)) throw error;
+    }
+  }
 }
 
 export const PAYMENT_ACTIVATIONS_SCHEMA = `CREATE TABLE IF NOT EXISTS payment_activations (

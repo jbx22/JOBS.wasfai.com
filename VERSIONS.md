@@ -4,6 +4,7 @@ Sequential snapshots of the project. Each version is a frozen copy of the source
 
 | Version | Date | Description |
 | --- | --- | --- |
+| jobs73 | 2026-11-23 14:25 | Make workspace and payment updates transactional and improve PostgreSQL gateway reliability |
 | jobs72 | 2026-11-23 10:53 | Add department admin workspaces, scoped assignments, and source-backed operator dashboards |
 | jobs71 | 2026-11-23 10:17 | Improve admin access and account controls and integrate JOBS with SAdmin |
 | jobs70 | 2026-11-22 22:10 | Use Career-Ops employer ingestion for Saudi vacancies and restore the HiringCafe portal link |

@@ -9,7 +9,7 @@ import {
   planById,
   publicPlans,
 } from "../_subscriptions.js";
-import { getJobDb } from "../_db.js";
+import { getJobDb, guardedUserBatch } from "../_db.js";
 
 export async function onRequestGet(context) {
   const db = getJobDb(context.env);
@@ -43,7 +43,7 @@ export async function onRequestPost(context) {
   if (!plan) return json({ error: "Unknown subscription plan.", code: "BAD_PLAN", plans: publicPlans() }, 400);
   await ensureSubscriptionSchema(db);
   if (plan.id === "free") {
-    await db.prepare(`
+    await guardedUserBatch(db, session.sub, "1 = 1", [], [db.prepare(`
       INSERT INTO subscriptions(user_id, plan, status, ai_monthly_limit_usd, current_period_end, updated_at)
       VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
       ON CONFLICT(user_id) DO UPDATE SET plan=excluded.plan, status=excluded.status,
@@ -51,7 +51,7 @@ export async function onRequestPost(context) {
         updated_at=CURRENT_TIMESTAMP
       WHERE subscriptions.plan='free' OR subscriptions.status<>'active'
         OR COALESCE(subscriptions.current_period_end,'')<=?
-    `).bind(session.sub, plan.id, plan.status_after_select, plan.ai_monthly_limit_usd, nextPeriodEnd(plan.billing), new Date().toISOString().slice(0,10)).run();
+    `).bind(session.sub, plan.id, plan.status_after_select, plan.ai_monthly_limit_usd, nextPeriodEnd(plan.billing), new Date().toISOString().slice(0,10))]);
     const current = await readCurrentSubscription(db, session.sub);
     if (current?.plan !== "free") return json({ code: "PAID_PLAN_ACTIVE", error: "Your paid subscription stays active until the end of its term." }, 409);
     return json({
