@@ -216,3 +216,26 @@
     inline-size: 100%;
   }
 }
+
+.ai-funding {
+  display: grid;
+  gap: .4rem;
+  min-inline-size: 0;
+  margin-block: .3rem;
+  padding: .65rem .85rem;
+  border-inline-start: 3px solid var(--teal);
+  background: var(--surface-2);
+}
+.ai-funding p { margin: 0; font-size: .875rem; line-height: 1.6; color: var(--ink-2); overflow-wrap: anywhere; }
+.ai-funding-options, .ai-funding-warning { display: grid; grid-template-columns: minmax(0, 1fr); gap: .5rem; }
+.ai-funding-options label { display: grid; min-inline-size: 0; gap: .2rem; color: var(--ink); }
+.ai-funding-options select {
+  inline-size: 100%; max-inline-size: 100%; min-inline-size: 0; min-block-size: 44px;
+  font: inherit; padding: .35rem .55rem; color: var(--ink); border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm); background: var(--surface);
+}
+.ai-funding-actions { display: flex; flex-wrap: wrap; gap: .45rem; }
+.ai-funding-actions .btn { height: auto; min-block-size: 44px; padding-block: .35rem; white-space: normal; }
+@media (min-width: 700px) {
+  .ai-funding-options:has(label:nth-child(2)) { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}

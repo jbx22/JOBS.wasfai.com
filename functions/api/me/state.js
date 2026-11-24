@@ -27,6 +27,9 @@ export async function onRequestPut(context) {
     });
     return json({ authenticated: true, user, state, storage: "postgres-normalized" });
   } catch (error) {
+    if (error?.code === "INVALID_AI_PREFERENCE") {
+      return json({ error: "Unsupported AI billing source or model.", code: error.code }, 400);
+    }
     if (error?.code === "STATE_CONFLICT") {
       return json({ error: "Workspace changed in another tab. Reload before saving.", code: "STATE_CONFLICT" }, 409);
     }

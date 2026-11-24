@@ -1,4 +1,6 @@
 import { getJobDb } from "./_db.js";
+export const PERSONAL_OPENROUTER_PROVIDER = "openrouter_personal";
+
 const TOKEN_PRICES_PER_MILLION = {
   "deepseek-v4-flash": { input: 0.20, output: 0.80 },
   "deepseek-flash": { input: 0.30, output: 1.20 }, // DeepSeek peak, uncached estimate.
@@ -12,7 +14,7 @@ export async function recordAiUsage(context, user, details = {}) {
   const usage = details.usage || {};
   const inputTokens = Number(usage.prompt_tokens || usage.input_tokens || 0);
   const outputTokens = Number(usage.completion_tokens || usage.output_tokens || 0);
-  const cost = estimateCost(details.model, inputTokens, outputTokens);
+  const cost = details.provider === PERSONAL_OPENROUTER_PROVIDER ? 0 : estimateCost(details.model, inputTokens, outputTokens);
   try {
     await db.prepare(`
       CREATE TABLE IF NOT EXISTS ai_usage (
@@ -46,7 +48,7 @@ export async function recordAiUsage(context, user, details = {}) {
   }
 }
 
-function estimateCost(model, inputTokens, outputTokens) {
+export function estimateCost(model, inputTokens, outputTokens) {
   const price = TOKEN_PRICES_PER_MILLION[String(model || "").toLowerCase()] || { input: 0, output: 0 };
   return Number((((inputTokens * price.input) + (outputTokens * price.output)) / 1_000_000).toFixed(6));
 }

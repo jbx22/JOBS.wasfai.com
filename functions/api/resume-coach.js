@@ -9,8 +9,7 @@
 
 import { inferResumeSignals } from "../../public/resume-signals.js";
 import { assessResumeText } from "../../public/resume-text-quality.js";
-import { recordAiUsage } from "./_ai_usage.js";
-import { DEEPSEEK_BASE_URL, DEEPSEEK_MODEL, resumeDeepseekKey } from "./_deepseek.js";
+import { CandidateAiError, candidateCompletion, resolveCandidateWriter, writerReceipt } from "./_candidate_ai.js";
 import { requireProtectedRequest } from "./_security.js";
 import { AuthError } from "./auth/_auth.js";
 
@@ -37,8 +36,14 @@ export async function onRequestPost(context) {
       target_locations: cleanText(payload.profile.target_locations) || sourceProfile.target_locations,
       resume_text: resumeText,
     };
-    const result = await improveWithAi(context, access.user, profile, sourceProfile);
-    return json({ ...result.body, source_profile: sourceProfile }, result.status);
+    try {
+      const writer = await resolveCandidateWriter(context.env, access.user.sub, payload, "resume-coach");
+      const draft = await improveWithAi(context, access.user, writer, profile, sourceProfile);
+      return json({ ...draft, ...writerReceipt(writer), source_profile: sourceProfile });
+    } catch (error) {
+      if (error instanceof CandidateAiError) return json({ ...error.toJSON(), source_profile: sourceProfile }, error.status);
+      throw error;
+    }
   } catch (error) {
     if (error instanceof AuthError) return json({ error: error.message, code: error.code }, error.status);
     console.error("Resume coach request failed before generation");
@@ -50,17 +55,7 @@ export async function onRequestOptions() {
   return new Response(null, { status: 204, headers: corsHeaders() });
 }
 
-async function improveWithAi(context, user, profile, sourceProfile) {
-  const env = context.env || {};
-  const apiKey = resumeDeepseekKey(env);
-  if (!apiKey) {
-    console.warn("Resume coach DeepSeek key is missing");
-    return { status: 503, body: { error: "AI resume coaching is temporarily unavailable.", code: "AI_UNAVAILABLE" } };
-  }
-
-  const provider = "deepseek";
-  const baseUrl = String(env.DEEPSEEK_BASE_URL || env.AI_BASE_URL || DEEPSEEK_BASE_URL).trim().replace(/\/+$/, "");
-  const model = DEEPSEEK_MODEL;
+async function improveWithAi(context, user, writer, profile, sourceProfile) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), GENERATION_TIMEOUT_MS);
   const messages = [
@@ -72,44 +67,19 @@ async function improveWithAi(context, user, profile, sourceProfile) {
   ];
 
   try {
-    for (let attempt = 0; attempt < 2; attempt++) {
-      const response = await fetch(`${baseUrl}/chat/completions`, {
-        method: "POST",
-        redirect: "manual",
-        signal: controller.signal,
-        headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model,
-          thinking: { type: "disabled" },
-          temperature: 0.25,
-          max_tokens: attempt > 0 || profile.resume_text.length > 12_000 ? 16384 : 8192,
-          response_format: { type: "json_object" },
-          messages,
-        }),
-      });
-      if (!response.ok) {
-        await recordAiUsage(context, user, { route: "resume-coach", provider, model, status: "provider_error" });
-        console.warn("Resume coach DeepSeek rejected the request", response.status);
-        const code = response.status === 429 ? "AI_BUSY" : "AI_UNAVAILABLE";
-        return { status: 503, body: { error: "AI resume coaching is temporarily unavailable.", code } };
-      }
-
-      const data = await response.json();
-      const choice = data?.choices?.[0];
-      const draft = choice?.finish_reason === "length" ? null : validateCoach(parseAiJson(choice?.message?.content), profile, sourceProfile);
-      const usage = recordAiUsage(context, user, { route: "resume-coach", provider, model, usage: data?.usage, status: draft ? "ok" : "invalid_output" });
-      if (typeof context.waitUntil === "function") context.waitUntil(usage);
-      else await usage;
-      if (draft) return { status: 200, body: { provider, model, ...draft } };
+    const attempts = writer.billingSource === "jobs" ? 2 : 1;
+    for (let attempt = 0; attempt < attempts; attempt++) {
+      const draft = await candidateCompletion(context, user, writer, "resume-coach", {
+        ...(writer.provider === "deepseek" ? { thinking: { type: "disabled" } } : {}),
+        temperature: 0.25,
+        max_tokens: attempt > 0 || profile.resume_text.length > 12_000 ? 16384 : 8192,
+        response_format: { type: "json_object" },
+        messages,
+      }, controller.signal, content => validateCoach(parseAiJson(content), profile, sourceProfile));
+      if (draft) return draft;
       messages.push({ role: "user", content: "Regenerate both complete documents from the full original. The previous answer was incomplete or omitted source details. Preserve the documented roles, dates, education, credentials and results in both languages. Use headings and factual bullets; return one complete JSON object." });
     }
-    console.warn("Resume coach DeepSeek returned an incomplete draft");
-    return { status: 503, body: { error: "AI resume coaching did not return both drafts.", code: "AI_INVALID_DRAFT" } };
-  } catch (error) {
-    const timedOut = controller.signal.aborted || error?.name === "AbortError";
-    await recordAiUsage(context, user, { route: "resume-coach", provider, model, status: timedOut ? "timeout" : "provider_error" });
-    console.warn("Resume coach DeepSeek request failed", timedOut ? "timeout" : "provider_error");
-    return { status: 503, body: { error: "AI resume coaching is temporarily unavailable.", code: timedOut ? "AI_TIMEOUT" : "AI_UNAVAILABLE" } };
+    throw new CandidateAiError("AI_INVALID_DRAFT", "AI resume coaching did not return both drafts.", 503);
   } finally {
     clearTimeout(timeout);
   }

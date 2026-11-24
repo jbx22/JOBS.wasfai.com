@@ -1,3 +1,4 @@
+import { PERSONAL_AI_MODELS } from "../../public/personal-ai-models.js";
 import { readActiveSession } from "./auth/_auth.js";
 import { buildBootstrap } from "./bootstrap.js";
 import { getJobDb, guardedUserBatch, isWriteConflict, USER_WRITE_GUARDS_SCHEMA } from "./_db.js";
@@ -29,6 +30,11 @@ const DOMAIN_TABLES_SQL = [
   `CREATE TABLE IF NOT EXISTS generated_kits (user_id TEXT NOT NULL, job_id TEXT NOT NULL, payload TEXT NOT NULL, approved INTEGER NOT NULL DEFAULT 0, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY (user_id, job_id))`,
 ];
 
+const AI_PREFERENCES = {
+  aiBillingSource: ["jobs", "openrouter_personal"],
+  aiPersonalModel: PERSONAL_AI_MODELS.map(model => model.id),
+};
+
 const STATE_KEYS = [
   "profile",
   "jobs",
@@ -49,6 +55,7 @@ const STATE_KEYS = [
   "masterResume",
   "tailoringBriefs",
   "aiWriterModel",
+  ...Object.keys(AI_PREFERENCES),
 ];
 
 export async function getAuthenticatedUser(context) {
@@ -95,6 +102,13 @@ export async function writeUserState(db, user, incoming, options = {}) {
     "SELECT document_key, revision, payload FROM user_state_documents WHERE user_id = ?",
   ).bind(user.sub).all();
   const current = new Map(rows.map((row) => [row.document_key, row]));
+  // Older clients save the whole workspace without knowing the personal billing settings.
+  for (const [key, choices] of Object.entries(AI_PREFERENCES)) {
+    if (incoming[key] === undefined && current.has(key)) state[key] = JSON.parse(current.get(key).payload);
+    if (!choices.includes(state[key])) {
+      throw Object.assign(new Error("Unsupported AI preference."), { code: "INVALID_AI_PREFERENCE" });
+    }
+  }
   const changedKeys = STATE_KEYS.filter((key) => current.get(key)?.payload !== JSON.stringify(state[key] ?? null));
   if (expected && changedKeys.some((key) => Number(expected[key] || 0) !== Number(current.get(key)?.revision || 0))) {
     throw workspaceConflict();
@@ -163,6 +177,8 @@ export function buildInitialState(user = {}) {
     masterResume: { ar: "", en: "", approved_at: "" },
     tailoringBriefs: {},
     aiWriterModel: "luna",
+    aiBillingSource: AI_PREFERENCES.aiBillingSource[0],
+    aiPersonalModel: AI_PREFERENCES.aiPersonalModel[0],
   };
 }
 

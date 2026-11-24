@@ -2,7 +2,7 @@ const { defineConfig } = require("@playwright/test");
 
 module.exports = defineConfig({
   testDir: ".",
-  testMatch: ["app-smoke.spec.js", "resume-extraction.spec.js", "resume-journey.spec.js", "job-search.spec.js", "mobile-workflow.spec.js", "vacancy-flow.spec.js", "pricing-workflow.spec.js"],
+  testMatch: ["app-smoke.spec.js", "resume-extraction.spec.js", "resume-journey.spec.js", "job-search.spec.js", "mobile-workflow.spec.js", "vacancy-flow.spec.js", "pricing-workflow.spec.js", "ai-connection.spec.js"],
   reporter: "line",
   use: {
     baseURL: process.env.JOBS_WASFAI_LOCAL_URL || "http://127.0.0.1:8788",

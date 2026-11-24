@@ -13,6 +13,10 @@ import { listPublicJobs, searchPublicJobs, matchPublicJobs } from "../functions/
 import { activatePaidSubscription, ensureSubscriptionSchema, planById } from "../functions/api/_subscriptions.js";
 import { getJobDb } from "../functions/api/_db.js";
 import { readUserState, writeUserState } from "../functions/api/_state.js";
+import { onRequestPost as connectOpenRouter } from "../functions/api/openrouter/connect.js";
+import { onRequestGet as openRouterCallback } from "../functions/api/openrouter/callback.js";
+import { onRequestPost as disconnectOpenRouter } from "../functions/api/openrouter/disconnect.js";
+import { onRequestPost as writeAnswer } from "../functions/api/ai-writer-chat.js";
 import { testEnv } from "./helpers/gateway.mjs";
 
 test("PostgreSQL: OAuth, employer moderation, public filters and invoice replay execute through translated SQL", {
@@ -32,7 +36,16 @@ test("PostgreSQL: OAuth, employer moderation, public filters and invoice replay 
       return { results: mode === "run" ? [] : mode === "first" ? result.rows.slice(0, 1) : result.rows, meta: { changes: result.rowCount } };
     };
     let hostedInvoice;
+    let personalCalls = 0;
     t.mock.method(globalThis, "fetch", async (url, init = {}) => {
+      if (String(url) === "https://openrouter.ai/api/v1/auth/keys") return Response.json({ key: "fixture-personal-credential" });
+      if (String(url) === "https://openrouter.ai/api/v1/chat/completions") {
+        personalCalls++;
+        assert.equal(init.headers.Authorization, "Bearer fixture-personal-credential");
+        assert.deepEqual(JSON.parse(init.body).provider, { only: ["openai"], allow_fallbacks: false });
+        return Response.json({ choices: [{ message: { content: "Practice explaining a project you led." } }],
+          usage: { prompt_tokens: 200, completion_tokens: 50 } });
+      }
       if (String(url) === "https://api.moyasar.com/v1/invoices") {
         const order = JSON.parse(init.body);
         hostedInvoice = { id: "pg-checkout", status: "initiated", amount: order.amount, currency: order.currency,
@@ -140,6 +153,28 @@ test("PostgreSQL: OAuth, employer moderation, public filters and invoice replay 
         body: body ? JSON.stringify(body) : undefined,
       }),
     });
+    const personalContext = (path, body = {}) => ({ env: testEnv, request: new Request("https://jobs.wasfai.com" + path, {
+      method: "POST", headers: { Cookie: cookie, "Content-Type": "application/json" }, body: JSON.stringify(body),
+    }) });
+    const started = await connectOpenRouter(personalContext("/api/openrouter/connect"));
+    assert.equal(started.status, 200);
+    const authUrl = new URL((await started.json()).authorization_url);
+    const returnUrl = new URL(authUrl.searchParams.get("callback_url"));
+    returnUrl.searchParams.set("code", "example-code");
+    const linked = await openRouterCallback({ env: testEnv, request: new Request(returnUrl, {
+      headers: { Cookie: cookie + "; " + started.headers.get("Set-Cookie").split(";")[0] },
+    }) });
+    assert.equal(linked.headers.get("Location"), "/account?openrouter=connected");
+    const draft = () => writeAnswer(personalContext("/api/ai-writer-chat", {
+      billing_source: "openrouter_personal", ai_model: "gpt-4.1-mini", question: "How should I prepare for this interview?",
+    }));
+    assert.equal((await draft()).status, 200);
+    const report = await (await operate("ai")).json();
+    assert.equal(report.usage.personal_metered_requests, 1);
+    assert.equal(report.usage.cost_usd, 0);
+    assert.equal((await disconnectOpenRouter(personalContext("/api/openrouter/disconnect"))).status, 200);
+    assert.equal((await draft()).status, 409);
+    assert.equal(personalCalls, 1);
     const ticket = await operate("support", "POST", {
       subject: "Invoice query", requester_email: employer.email, priority: "normal", summary: "Asked about an invoice.",
     });

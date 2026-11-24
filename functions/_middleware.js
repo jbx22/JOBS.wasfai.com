@@ -17,6 +17,10 @@ const UNSAFE_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 const MAX_API_BODY_BYTES = 2 * 1024 * 1024;
 const MAX_RESUME_UPLOAD_BYTES = 10 * 1024 * 1024;
 
+function isOpenRouterCallback(pathname) {
+  return /^\/api\/openrouter\/callback(?:\/[A-Za-z0-9_-]{43})?\/?$/.test(pathname || "");
+}
+
 function apiError(message, code, status) {
   return new Response(JSON.stringify({ error: message, code }), {
     status,
@@ -57,7 +61,7 @@ export async function onRequest(context) {
   }
 
   // Revalidate signed sessions against durable status on every API request.
-  const authFlow = ["/api/auth/google/start", "/api/auth/google/callback", "/api/auth/logout", "/api/auth/qa", "/api/auth/session"].includes(url.pathname);
+  const authFlow = ["/api/auth/google/start", "/api/auth/google/callback", "/api/auth/logout", "/api/auth/qa", "/api/auth/session"].includes(url.pathname) || isOpenRouterCallback(url.pathname);
   if (isApi && !authFlow) {
     try {
       await readActiveSession(context.request, context.env || {});
@@ -75,6 +79,7 @@ export async function onRequest(context) {
 function withSecurityHeaders(response, isApi, pathname) {
   const headers = new Headers(response.headers);
   for (const [name, value] of Object.entries(SECURITY_HEADERS)) headers.set(name, value);
+  if (isOpenRouterCallback(pathname)) headers.set("Referrer-Policy", "no-referrer");
   if (pathname === "/vendor/resume/ocr-5.1.1/worker.min.js") {
     headers.set("Content-Security-Policy", "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; connect-src 'self'");
   }

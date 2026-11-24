@@ -1,0 +1,68 @@
+:root {
+  color-scheme: light;
+  --ink: #14211f;
+  --muted: #475852;
+  --line: #cddbd5;
+  --paper: #fff;
+  --surface: #f7faf8;
+  --teal: #0b655d;
+  --tint: #e7f4ee;
+  font-family: "IBM Plex Sans Arabic", "Segoe UI", Tahoma, Arial, sans-serif;
+}
+* { box-sizing: border-box; min-inline-size: 0; }
+body { margin: 0; background: var(--surface); color: var(--ink); font-size: 1rem; line-height: 1.6; }
+button { font: inherit; }
+a { color: var(--teal); }
+p, h1, h2, ol, dl, dd { margin: 0; }
+button, summary { cursor: pointer; }
+:where(a,button,summary):focus-visible { outline: 3px solid var(--teal); outline-offset: 3px; }
+.pricing-shell { max-inline-size: 70rem; margin-inline: auto; padding: 0 clamp(.85rem, 4vw, 2rem) 3rem; }
+.pricing-top, .pricing-top nav, .brand, .actions { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem 1rem; }
+.pricing-top { padding-block: .65rem; border-block-end: 1px solid var(--line); justify-content: space-between; }
+.brand { color: var(--ink); text-decoration: none; gap: .45rem; }
+.brand img { inline-size: 2.25rem; block-size: 2.25rem; border-radius: 50%; }
+.pricing-top a, .text-link { display: inline-flex; align-items: center; min-block-size: 44px; }
+.text-link, .pricing-top nav a { padding: 0; border: none; background: transparent; text-decoration: underline; text-underline-offset: .18rem; color: var(--teal); font-weight: 650; }
+.hero { padding-block: clamp(1.4rem, 4vw, 3rem) 1rem; }
+.hero h1 { margin-block-end: .3rem; font-size: clamp(1.7rem, 4vw, 2.8rem); line-height: 1.26; }
+.hero p, .plan-card > p:not(.price), .billing-notes, .history li span { color: var(--muted); }
+.panel, .plan-card { border: 1px solid var(--line); border-radius: .85rem; padding: clamp(.85rem, 2vw, 1.3rem); background: var(--paper); overflow-wrap: anywhere; }
+.panel { margin-block: .7rem; }
+.panel h2 { font-size: 1rem; }
+.current, .feedback { display: grid; justify-items: start; gap: .35rem; }
+.current > div { display: flex; align-items: baseline; flex-wrap: wrap; gap: .4rem 1rem; }
+.current strong { font-size: 1.2rem; }
+.feedback { background: var(--tint); }
+.feedback.error { background: #fff3ea; border-color: #e6b497; }
+.plans { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .8rem; margin-block: 1.1rem; align-items: start; }
+.plan-card { display: grid; gap: .8rem; scroll-margin-block: 1rem; }
+.plan-card[data-selected], .plan-card:target { outline: 2px solid var(--teal); outline-offset: -2px; }
+.plan-card h2 { font-size: 1.2rem; }
+.price { color: var(--muted); }
+.price strong { color: var(--ink); font-size: 2.25rem; line-height: 1.15; }
+.btn { display: inline-flex; align-items: center; justify-content: center; min-block-size: 44px; padding: .5rem 1rem; border: 1px solid var(--line); border-radius: .6rem; background: white; color: var(--ink); font-weight: 700; text-align: center; text-decoration: none; white-space: normal; }
+.btn.primary { background: var(--teal); border-color: var(--teal); color: white; }
+.btn:disabled { color: var(--muted); background: #eef3f0; border-color: var(--line); cursor: default; }
+.plan-card details { border-block-start: 1px solid var(--line); }
+summary { min-block-size: 44px; align-content: center; padding-block: .55rem; font-weight: 650; }
+.limits > div, .history li { display: flex; justify-content: space-between; gap: .65rem; padding-block: .4rem; }
+.limits dd, .history li div:last-child { font-weight: 650; }
+.history { padding-block: .25rem; }
+.history ol { padding: 0; list-style: none; }
+.history li { align-items: baseline; flex-wrap: wrap; border-block-start: 1px solid var(--line); }
+.history li span, .history li .text-link { display: block; }
+.history li .text-link { align-content: center; }
+.billing-notes { font-size: .92rem; }
+.pricing-loader { display: grid; justify-content: center; align-content: center; text-align: center; justify-items: center; gap: .5rem; min-height: 45vh; }
+@media (max-width: 780px) {
+  .plans { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 440px) {
+  .pricing-top { gap: .1rem .4rem; }
+  .brand strong { font-size: .86rem; }
+  .brand img { inline-size: 1.75rem; block-size: 1.75rem; }
+  .pricing-top nav { gap: .7rem; font-size: .9rem; }
+  .price strong { font-size: 1.85rem; }
+}
+.cancel-confirm { display: grid; gap: .45rem; border-block-start: 1px solid var(--line); margin-block-start: .4rem; padding-block-start: .65rem; }
+[hidden] { display: none !important; }

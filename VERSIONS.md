@@ -4,6 +4,7 @@ Sequential snapshots of the project. Each version is a frozen copy of the source
 
 | Version | Date | Description |
 | --- | --- | --- |
+| jobs80 | 2026-11-24 15:34 | Add optional personal OpenRouter billing and provider selection for résumé coaching and application writing |
 | jobs79 | 2026-11-24 14:55 | Improve subscription management, checkout and payment verification |
 | jobs78 | 2026-11-24 14:00 | Simplify the mobile résumé, search and job application workflows |
 | jobs77 | 2026-11-24 13:35 | Recover unreadable résumé uploads, strengthen DeepSeek coaching and guide applicants to relevant vacancies |

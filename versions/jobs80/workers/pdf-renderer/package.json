@@ -1,0 +1,9 @@
+{
+  "name": "jobs-wasfai-pdf-renderer",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@cloudflare/containers": "^0.0.31",
+    "mena-job-command-center": "file:../.."
+  }
+}
