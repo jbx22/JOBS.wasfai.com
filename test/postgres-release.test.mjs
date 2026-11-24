@@ -31,12 +31,15 @@ test("PostgreSQL: OAuth, employer moderation, public filters and invoice replay 
       const result = await client.query(translateSql(sql), params);
       return { results: mode === "run" ? [] : mode === "first" ? result.rows.slice(0, 1) : result.rows, meta: { changes: result.rowCount } };
     };
+    let hostedInvoice;
     t.mock.method(globalThis, "fetch", async (url, init = {}) => {
       if (String(url) === "https://api.moyasar.com/v1/invoices") {
         const order = JSON.parse(init.body);
-        return Response.json({ id: "pg-checkout", status: "initiated", amount: order.amount, currency: order.currency,
-          metadata: order.metadata, url: "https://checkout.moyasar.com/invoices/pg-checkout" });
+        hostedInvoice = { id: "pg-checkout", status: "initiated", amount: order.amount, currency: order.currency,
+          metadata: order.metadata, url: "https://checkout.moyasar.com/invoices/pg-checkout" };
+        return Response.json(hostedInvoice);
       }
+      if (String(url) === "https://api.moyasar.com/v1/invoices/pg-checkout") return Response.json(hostedInvoice);
       if (String(url).endsWith("googleapis.com/token")) return Response.json({ access_token: "test-token" });
       if (String(url).includes("openidconnect.googleapis.com")) return Response.json({ sub: "pg-user", email: "pg@example.com", name: "جابر", email_verified: true });
       assert.ok(String(url).startsWith("https://gateway.test/"));
@@ -73,6 +76,17 @@ test("PostgreSQL: OAuth, employer moderation, public filters and invoice replay 
     const legacyInvoice = { id: "legacy-invoice", status: "paid", amount: 5000, currency: "SAR", metadata: { user_id: "legacy-user", plan: plan.id } };
     assert.equal((await activatePaidSubscription(db, "legacy-user", plan, legacyInvoice)).already_activated, true);
     assert.equal((await db.prepare("SELECT current_period_end FROM subscriptions WHERE user_id=?").bind("legacy-user").first()).current_period_end, legacyEnd);
+    const futureEnd = new Date(Date.now() + 40 * 86400000).toISOString().slice(0, 10);
+    await db.prepare("INSERT INTO subscriptions(user_id,plan,status,current_period_end) VALUES(?,?,?,?)")
+      .bind("renewing-user", "gold_monthly", "active", futureEnd).run();
+    const annual = planById("gold_annual");
+    const renewal = { id: "annual-renewal", status: "paid", amount: 49900, currency: "SAR", metadata: { user_id: "renewing-user", plan: annual.id } };
+    assert.equal((await activatePaidSubscription(db, "renewing-user", annual, renewal)).activated, true);
+    const expectedEnd = new Date(Date.parse(futureEnd) + 365 * 86400000).toISOString().slice(0, 10);
+    assert.equal((await db.prepare("SELECT current_period_end FROM subscriptions WHERE user_id=?").bind("renewing-user").first()).current_period_end, expectedEnd);
+    await db.prepare("INSERT INTO payment_refunds(provider_invoice_id,refunded_halalas) VALUES (?,?)").bind("refunded-first", 2500).run();
+    assert.equal((await activatePaidSubscription(db, "renewing-user", annual, { ...renewal, id: "refunded-first" })).blocked, true);
+
     const oauth = await callback({ env: testEnv, request: new Request("https://jobs.wasfai.com/api/auth/google/callback?code=test&state=state", {
       headers: { Cookie: "jobs_oauth_state=state; jobs_oauth_pkce=" + "a".repeat(64) },
     }) });
@@ -109,8 +123,9 @@ test("PostgreSQL: OAuth, employer moderation, public filters and invoice replay 
     const replay = await activatePaidSubscription(db, employer.sub, plan, invoice);
     assert.equal(replay.already_activated, true);
     const cookie = (await sessionCookie(employer, testEnv.AUTH_COOKIE_SECRET)).split(";")[0];
+    const renewalFrom = (await db.prepare("SELECT current_period_end FROM subscriptions WHERE user_id=?").bind(employer.sub).first()).current_period_end;
     const checkout = () => selectPlan({ env: { ...testEnv, MOYASAR_SECRET_KEY: "sk_live_fixture" }, request: new Request("https://jobs.wasfai.com/api/subscriptions", {
-      method: "POST", headers: { Cookie: cookie, "Content-Type": "application/json" }, body: JSON.stringify({ plan: plan.id }),
+      method: "POST", headers: { Cookie: cookie, "Content-Type": "application/json" }, body: JSON.stringify({ plan: plan.id, renew: true, renew_from: renewalFrom }),
     }) });
     const created = await checkout();
     assert.equal(created.status, 201, await created.clone().text());

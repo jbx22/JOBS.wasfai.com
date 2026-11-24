@@ -4,6 +4,7 @@ Sequential snapshots of the project. Each version is a frozen copy of the source
 
 | Version | Date | Description |
 | --- | --- | --- |
+| jobs79 | 2026-11-24 14:55 | Improve subscription management, checkout and payment verification |
 | jobs78 | 2026-11-24 14:00 | Simplify the mobile résumé, search and job application workflows |
 | jobs77 | 2026-11-24 13:35 | Recover unreadable résumé uploads, strengthen DeepSeek coaching and guide applicants to relevant vacancies |
 | jobs76 | 2026-11-23 19:22 | Add bilingual vacancy browsing and rank résumé matches using occupational evidence |

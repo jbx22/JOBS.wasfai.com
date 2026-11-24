@@ -296,3 +296,7 @@
 
 - Simplify the mobile résumé, search and job application workflows
 
+## jobs79 — 2026-11-24 14:55
+
+- Improve subscription management, checkout and payment verification
+

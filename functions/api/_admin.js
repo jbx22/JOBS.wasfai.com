@@ -1,3 +1,4 @@
+import { FREE_MONTHLY_AI_BUDGET_USD } from "./_subscriptions.js";
 import { readActiveSession } from "./auth/_auth.js";
 import { json } from "./_state.js";
 import { getJobDb } from "./_db.js";
@@ -52,7 +53,7 @@ const ADMIN_SCHEMA = [
     user_id TEXT PRIMARY KEY,
     plan TEXT NOT NULL DEFAULT 'free',
     status TEXT NOT NULL DEFAULT 'trial',
-    ai_monthly_limit_usd REAL NOT NULL DEFAULT 5,
+    ai_monthly_limit_usd REAL NOT NULL DEFAULT ${FREE_MONTHLY_AI_BUDGET_USD},
     current_period_end TEXT,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP

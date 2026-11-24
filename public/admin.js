@@ -1,4 +1,4 @@
-import { bindWorkspace, workspaceIds, workspaceUrl, workspaceView } from "./admin-workspaces.js?v=jobs72";
+import { bindWorkspace, workspaceIds, workspaceUrl, workspaceView } from "./admin-workspaces.js?v=jobs79";
 
 const root = document.getElementById("admin-root");
 const mode = document.body.dataset.adminMode === "super" ? "super" : "admin";
@@ -223,7 +223,7 @@ function renderUsers() {
     <section class="panel">
       <div class="panel-head"><h2>User management</h2><form class="toolbar" data-user-search><input class="input" name="q" aria-label="Search email or name" placeholder="Search email or name" value="${esc(state.q)}"><select class="select" name="status" aria-label="Account status"><option value="">All statuses</option><option value="active" ${state.status === "active" ? "selected" : ""}>Active</option><option value="suspended" ${state.status === "suspended" ? "selected" : ""}>Suspended</option></select><button class="btn">Search</button></form></div>
       <div class="table-wrap"><table><thead><tr><th>User</th><th>Status</th><th>Subscription</th><th>Last login</th><th>Actions</th></tr></thead><tbody>
-        ${state.users.map((u) => `<tr><td><strong>${esc(u.display_name || "Unnamed")}</strong><small>${esc(u.email)}</small></td><td>${badge(u.account_status)}</td><td>${badge(u.plan, "blue")} ${badge(u.subscription_status, "gold")}</td><td>${date(u.last_login_at)}</td><td><div class="row-actions">${userActions(u)}</div></td></tr>`).join("")}
+        ${state.users.map((u) => `<tr><td><strong>${esc(u.display_name || "Unnamed")}</strong><small>${esc(u.email)}</small></td><td>${badge(u.account_status)}</td><td>${badge(u.plan, "blue")} ${badge(u.effective_status || u.subscription_status, "gold")}</td><td>${date(u.last_login_at)}</td><td><div class="row-actions">${userActions(u)}</div></td></tr>`).join("")}
       </tbody></table></div>${state.users.length ? "" : `<div class="panel-body"><div class="empty">No users found.</div></div>`}
       ${state.offset || state.nextOffset !== null ? `<div class="panel-body toolbar"><button class="btn" data-user-page="${Math.max(0, state.offset - 100)}" ${!state.offset ? "disabled" : ""}>Previous</button><span>Page ${state.offset / 100 + 1}</span><button class="btn" data-user-page="${state.nextOffset}" ${state.nextOffset === null ? "disabled" : ""}>Next</button></div>` : ""}
     </section>`;
@@ -236,7 +236,7 @@ function renderSubscribers() {
       <div class="table-wrap"><table><thead><tr><th>Subscriber</th><th>Plan</th><th>AI limit</th><th>AI usage</th><th>Actions</th></tr></thead><tbody>
         ${state.subscribers.map((s) => `<tr>
           <td><strong>${esc(s.display_name || "Unnamed")}</strong><small>${esc(s.email)}</small></td>
-          <td>${badge(s.plan, "blue")} ${badge(s.subscription_status, "gold")}</td>
+          <td>${badge(s.plan, "blue")} ${badge(s.effective_status || s.subscription_status, "gold")}</td>
           <td>${money(s.ai_monthly_limit_usd)}</td>
           <td><strong>${money(s.ai_cost_usd)}</strong><small>${Number(s.ai_tokens || 0).toLocaleString()} tokens</small></td>
           <td><div class="row-actions"><button class="btn" data-sub-edit="${esc(s.id)}">Manage</button></div></td>
@@ -252,10 +252,15 @@ function renderBilling() {
   const canManage = state.admin?.role === "super_admin";
   return `
     <div class="grid kpis">
-      ${kpi("Gross payments", sar(summary.gross_sar), "recorded in SAR")}
-      ${kpi("Paid", summary.paid || 0, "successful payments")}
+      ${kpi("Net collections", sar(summary.net_sar), "verified after reversals, before fees")}
+      ${kpi("Gross collections", sar(summary.gross_sar), "verified charges")}
+      ${kpi("Refunds", sar(summary.refunded_sar), (summary.partially_refunded || 0) + " partial · " + (summary.refunded || 0) + " full")}
+      ${kpi("Voided collections", sar(summary.voided_charge_sar), (summary.voided || 0) + " voided orders")}
+      ${kpi("Manual activations", summary.manual || 0, sar(summary.manual_sar) + " order value")}
+      ${kpi("Paid", summary.paid || 0, "verified with no reversal")}
       ${kpi("Pending", summary.pending || 0, "awaiting confirmation")}
       ${kpi("Failed", summary.failed || 0, "failed or expired")}
+      ${summary.unreconciled ? kpi("Needs reconciliation", summary.unreconciled, "excluded from collections") : ""}
       ${kpi("Gateway", gateway.configured ? "Ready" : "Setup", gateway.webhook_configured ? "webhook secured" : "webhook secret missing")}
     </div>
     <section class="panel">
@@ -268,24 +273,24 @@ function renderBilling() {
         </div>
         <div class="alert ${gateway.configured && gateway.webhook_configured ? "teal" : ""}">
           ${gateway.configured && gateway.webhook_configured
-            ? "Server-side checkout and signed webhook verification are ready."
+            ? "Checkout credentials and the webhook secret are configured."
             : "Add the missing Cloudflare secrets, then register the webhook URL and matching secret token in Moyasar Dashboard."}
         </div>
       </div>
     </section>
     <section class="panel">
       <div class="panel-head"><h2>Transactions</h2><button class="btn" data-refresh>Refresh</button></div>
-      <div class="table-wrap"><table><thead><tr><th>Customer</th><th>Plan</th><th>Amount</th><th>Status</th><th>Moyasar invoice</th><th>Created</th><th>Actions</th></tr></thead><tbody>
+      <div class="table-wrap"><table><thead><tr><th>Customer</th><th>Plan</th><th>Order amount</th><th>Status</th><th>Moyasar invoice</th><th>Created</th><th>Actions</th></tr></thead><tbody>
         ${(data.payments || []).map((p) => `<tr>
           <td><strong>${esc(p.display_name || "Unnamed")}</strong><small>${esc(p.email || p.user_id)}</small></td>
           <td>${badge(p.plan, "blue")}</td>
-          <td><strong>${sar(p.amount_sar)}</strong><small>${esc(p.currency)}</small></td>
+          <td><strong>${p.currency === "SAR" ? sar(p.amount_sar) : "—"}</strong>${p.currency !== "SAR" ? "<small>" + esc(p.currency) + "</small>" : ""}</td>
           <td>${badge(p.status, paymentTone(p.status))}</td>
           <td><code>${esc(shortId(p.provider_invoice_id))}</code><small>${esc(p.provider_payment_id ? `Payment ${shortId(p.provider_payment_id)}` : "No payment ID")}</small></td>
           <td>${date(p.created_at)}</td>
           <td><div class="row-actions">
             ${canManage && p.provider_invoice_id ? `<button class="btn blue" data-payment-sync="${p.id}">Sync</button>` : ""}
-            ${canManage && !["paid", "captured", "paid_manual"].includes(p.status) ? `<button class="btn danger" data-payment-activate="${p.id}">Manual activate</button>` : ""}
+            ${canManage && p.provider === "moyasar" && p.provider_invoice_id && ["initiated", "on_hold"].includes(p.status) ? `<button class="btn danger" data-payment-activate="${p.id}">Manual activate</button>` : ""}
           </div></td>
         </tr>`).join("")}
       </tbody></table></div>${(data.payments || []).length ? "" : `<div class="panel-body"><div class="empty">No payment attempts yet.</div></div>`}
@@ -559,7 +564,7 @@ function shortId(value) {
 
 function paymentTone(value) {
   const status = String(value || "");
-  if (["paid", "captured", "verified", "paid_manual"].includes(status)) return "teal";
+  if (["paid", "captured", "verified"].includes(status)) return "teal";
   if (["failed", "expired", "canceled", "voided", "refunded"].includes(status)) return "rose";
   return "gold";
 }

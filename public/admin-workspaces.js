@@ -135,7 +135,10 @@ function accountingView(data, filters) {
   return `
     <div class="workspace-metrics">
       ${metric("Payment records", data.totals.records, "Orders created in this period")}
-      ${metric("Verified payments", money(data.totals.verified_halalas, "SAR"), "Matched paid invoices")}
+      ${metric("Verified collections", money(data.totals.gross_halalas, "SAR"), "Gross charges on these orders")}
+      ${metric("Refunds", money(data.totals.refunded_halalas, "SAR"), data.totals.partially_refunded + " partial · " + data.totals.refunded + " full")}
+      ${metric("Voided collections", money(data.totals.voided_charge_halalas, "SAR"), data.totals.voided + " voided orders")}
+      ${metric("Net collections", money(data.totals.verified_halalas, "SAR"), "After verified reversals, before processor fees")}
       ${metric("Manual activations", money(data.totals.manual_halalas, "SAR"), "Order value recorded separately")}
     </div>
     <section class="panel"><div class="panel-head"><h2>Payment register</h2>
@@ -145,7 +148,9 @@ function accountingView(data, filters) {
         <a class="btn primary" href="/api/admin/accounting/export?days=${filters.days === 90 ? "90" : "30"}">Download CSV</a>
       </form>
     </div><div class="panel-body record-list">
-      <p class="helper">Use gateway or bank statements to review these records. A review records your reference and leaves payment status as recorded by billing.</p>
+      <p class="helper">Figures reflect the current status of orders created in the selected period. Use a gateway or bank statement to record a review.</p>
+      ${data.totals.unreconciled ? '<p class="helper">' + esc(data.totals.unreconciled) + ' order(s) require payment reconciliation and are excluded from collections.</p>' : ""}
+      ${data.totals.duplicates ? '<p class="helper">' + esc(data.totals.duplicates) + ' duplicate invoice record(s) are excluded from collections.</p>' : ""}
       ${data.rows.map(paymentRecord).join("") || '<p class="empty">No payments in this period.</p>'}
       ${data.truncated ? '<p class="helper">Showing the newest 200 payments. Download CSV for additional rows.</p>' : ""}
     </div></section>`;
@@ -153,15 +158,22 @@ function accountingView(data, filters) {
 
 function paymentRecord(row) {
   const reference = row.provider_invoice_id || row.provider_payment_id || "Order " + row.id;
+  const collectionNote = {
+    pending: "Awaiting payment confirmation.", manual: "Access granted manually. No verified collection is recorded.",
+    failed: "No collection recorded.", duplicate: "Duplicate invoice record excluded from collections.",
+    unreconciled: "Payment evidence is incomplete. Reconcile the invoice before reviewing it.",
+  }[row.collection] || "No verified collection recorded.";
   return `<details class="workspace-record">
     <summary><span><strong>${esc(reference)}</strong><small>${esc(row.created_at)} UTC · ${esc(row.plan)} · ${esc(row.provider)}</small></span>
       <span class="record-meta"><strong>${esc(money(row.amount_halalas, row.currency))}</strong>${pill(row.status)}${row.reviewed_at ? pill("Reviewed") : ""}</span>
     </summary>
     <div class="record-body">
-      <p>${row.verified_at ? "Verified payment recorded " + esc(row.verified_at) + " UTC." : "No matched paid invoice has been recorded for the current status."}</p>
-      ${row.reviewed_at ? `<p>Reviewed ${esc(row.reviewed_at)} UTC · ${esc(row.review_reference)}</p>` : `
+      ${row.net_halalas != null ? `<p>Net collected <strong>${esc(money(row.net_halalas, row.currency))}</strong>${row.refunded_halalas > 0 ? " · refunded " + esc(money(row.refunded_halalas, row.currency)) : ""}${row.voided_charge_halalas > 0 ? " · voided " + esc(money(row.voided_charge_halalas, row.currency)) : ""}</p>` : `<p>${collectionNote}</p>`}
+      ${row.verified_at ? '<p>Payment activation recorded ' + esc(row.verified_at) + ' UTC.</p>' : ""}
+      ${row.reviewed_at ? `<p>Reviewed ${esc(row.reviewed_at)} UTC · ${esc(row.review_reference)}</p>` : ["unreconciled", "duplicate"].includes(row.collection) ? "" : `
         <form class="toolbar" data-workspace-action="payment-review" data-id="${esc(row.id)}">
           <input type="hidden" name="status" value="${esc(row.status)}"><input type="hidden" name="amount_halalas" value="${esc(row.amount_halalas)}">
+          <input type="hidden" name="review_amount_halalas" value="${esc(row.net_halalas ?? row.amount_halalas)}">
           <label>Statement reference <input class="input" name="reference" required minlength="3" maxlength="120"></label>
           <button class="btn primary">Record review</button>
         </form>`}

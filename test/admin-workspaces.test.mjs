@@ -101,3 +101,55 @@ test("AI usage reads and settings edits have different permissions", async t => 
   assert.equal((await request("/ai/settings", { user: support, method: "PUT", data: { monthly_budget_usd: 10 } })).status, 200);
   assert.equal((await (await request("/ai", { user: support })).json()).settings.monthly_budget_usd, "10");
 });
+
+test("finance, accounting and CSV distinguish collections, partial refunds, voids and noncash orders", async t => {
+  const fixture = gatewayFixture(t);
+  fixture.addUser("active", owner);
+  assert.equal((await request("/accounting")).status, 200);
+  const order = fixture.db.prepare(`INSERT INTO subscription_payments
+    (user_id, plan, provider_invoice_id, amount_halalas, amount_sar, currency, status, raw_payload)
+    VALUES ('owner', 'gold_monthly', ?, 10000, 100, 'SAR', ?, '{"private_fixture":"never-export"}')`);
+  const activation = fixture.db.prepare("INSERT INTO payment_activations (invoice_id, user_id, plan, activation_id) VALUES (?, 'owner', 'gold_monthly', 'verified')");
+  const reversal = fixture.db.prepare("INSERT INTO payment_refunds (provider_invoice_id, refunded_halalas) VALUES (?, ?)");
+  const scenarios = [
+    ["settled", "paid", true], ["partial", "partially_refunded", false, 3000], ["full", "refunded", false, 10000],
+    ["auth-void", "voided", false, 10000], ["collection-void", "voided", true, 10000],
+    ["manual", "paid_manual"], ["unpaid", "on_hold"], ["failed", "failed"],
+    ["legacy", "refunded"], ["missing-proof", "paid"], ["settled", "paid"],
+  ];
+  for (const [id, status, paid, amount] of scenarios) {
+    order.run(id, status);
+    if (paid) activation.run(id);
+    if (amount) reversal.run(id, amount);
+  }
+  const register = await (await request("/accounting")).json();
+  assert.deepEqual(register.totals, {
+    records: 11, gross_halalas: 40000, refunded_halalas: 13000, voided_charge_halalas: 10000, verified_halalas: 17000,
+    manual_halalas: 10000, paid: 1, manual: 1, pending: 1, failed: 1, partially_refunded: 1, refunded: 1,
+    voided: 2, unreconciled: 2, duplicates: 1,
+  });
+  const { summary } = await (await request("/payments")).json();
+  assert.equal(summary.net_sar, 170);
+  assert.equal(summary.gross_sar, 400);
+  assert.equal(summary.refunded_sar, 130);
+  assert.equal(summary.voided_charge_sar, 100);
+  assert.equal(summary.manual_sar, 100);
+  const net = Object.fromEntries(register.rows.map(row => [row.collection + "-" + row.provider_invoice_id, row.net_halalas]));
+  assert.equal(net["partially_refunded-partial"], 7000);
+  assert.equal(net["refunded-full"], 0);
+  assert.equal(net["unreconciled-legacy"], null);
+  assert.equal(net["duplicate-settled"], null);
+  const csv = await (await request("/accounting/export")).text();
+  const partial = csv.split("\r\n").find(line => line.includes('"partial"'));
+  assert.match(partial, /"partially_refunded","partially_refunded","10000","3000","","7000"/);
+  assert.doesNotMatch(csv, /private_fixture|never-export|raw_payload/);
+
+  const review = { status: "partially_refunded", amount_halalas: 10000, review_amount_halalas: 7000, reference: "statement-1" };
+  assert.equal((await request("/accounting/2", { method: "POST", data: review })).status, 200);
+  fixture.db.prepare("UPDATE payment_refunds SET refunded_halalas=4500 WHERE provider_invoice_id='partial'").run();
+  assert.equal((await request("/accounting/2", { method: "POST", data: review })).status, 409);
+  const updated = await (await request("/accounting")).json();
+  assert.equal(updated.totals.verified_halalas, 15500);
+  assert.equal(updated.rows.find(row => row.id === 2).reviewed_at, null);
+  assert.equal((await request("/accounting/2", { method: "POST", data: { ...review, review_amount_halalas: 5500, reference: "statement-2" } })).status, 200);
+});
