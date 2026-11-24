@@ -300,3 +300,7 @@
 
 - Improve subscription management, checkout and payment verification
 
+## jobs80 — 2026-11-24 15:34
+
+- Add optional personal OpenRouter billing and provider selection for résumé coaching and application writing
+

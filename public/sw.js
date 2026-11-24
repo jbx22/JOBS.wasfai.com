@@ -1,4 +1,4 @@
-const CACHE_NAME = "jobs-wasfai-v79";
+const CACHE_NAME = "jobs-wasfai-v80";
 const APP_SHELL = [
   "/",
   "/app",
@@ -7,6 +7,8 @@ const APP_SHELL = [
   "/account-flow.css",
   "/home-flow.css",
   "/app.js",
+  "/ai-billing-ui.js",
+  "/personal-ai-models.js",
   "/return-path.js",
   "/resume-signals.js",
   "/resume-text-quality.js",
@@ -16,8 +18,8 @@ const APP_SHELL = [
   "/super-admin/",
   "/pricing/",
   "/admin.css?v=jobs72",
-  "/admin-workspaces.js?v=jobs79",
-  "/admin.js?v=jobs79",
+  "/admin-workspaces.js?v=jobs80",
+  "/admin.js?v=jobs80",
   "/pricing.css",
   "/pricing.js",
   "/offline.html",
@@ -56,7 +58,7 @@ self.addEventListener("fetch", (event) => {
   }
   // HTML and application code are network-first so deployments update quickly,
   // with a versioned cached fallback for resilient read-only offline access.
-  if (url.origin === self.location.origin && (event.request.mode === "navigate" || /^\/(?:app\.js|return-path\.js|pricing\.js|resume-extraction\.js|resume-signals\.js|resume-text-quality\.js|resume-docx\.mjs)$/.test(url.pathname))) {
+  if (url.origin === self.location.origin && (event.request.mode === "navigate" || /^\/(?:app\.js|ai-billing-ui\.js|personal-ai-models\.js|return-path\.js|pricing\.js|resume-extraction\.js|resume-signals\.js|resume-text-quality\.js|resume-docx\.mjs)$/.test(url.pathname))) {
     event.respondWith(fetch(event.request, { cache: "no-store" }).then((response) => {
       if (response.ok && !/no-store|private/i.test(response.headers.get("Cache-Control") || "")) {
         const copy = response.clone();

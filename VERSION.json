@@ -1,7 +1,7 @@
 {
-  "current": 79,
-  "lastDescription": "Improve subscription management, checkout and payment verification",
-  "lastAt": "2026-11-24 14:55",
+  "current": 80,
+  "lastDescription": "Add optional personal OpenRouter billing and provider selection for résumé coaching and application writing",
+  "lastAt": "2026-11-24 15:34",
   "history": [
     {
       "n": 1,
@@ -387,6 +387,11 @@
       "n": 79,
       "description": "Improve subscription management, checkout and payment verification",
       "at": "2026-11-24 14:55"
+    },
+    {
+      "n": 80,
+      "description": "Add optional personal OpenRouter billing and provider selection for résumé coaching and application writing",
+      "at": "2026-11-24 15:34"
     }
   ]
 }

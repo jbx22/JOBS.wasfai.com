@@ -1,4 +1,4 @@
-import { bindWorkspace, workspaceIds, workspaceUrl, workspaceView } from "./admin-workspaces.js?v=jobs79";
+import { bindWorkspace, workspaceIds, workspaceUrl, workspaceView } from "./admin-workspaces.js?v=jobs80";
 
 const root = document.getElementById("admin-root");
 const mode = document.body.dataset.adminMode === "super" ? "super" : "admin";
@@ -203,7 +203,7 @@ function renderOverview() {
       ${kpi("Subscribers", k.subscribers, "trial and active")}
       ${kpi("Admins", k.admins, "active operators")}
       ${kpi("Applications", k.applications, "tracked jobs")}
-      ${kpi("AI cost", money(k.ai_cost_usd), "recorded usage")}
+      ${kpi("Jobs AI cost", money(k.ai_cost_usd), "estimated platform spend")}
     </div>
     <div class="grid two">
       <section class="panel"><div class="panel-head"><h2>Work queues</h2></div><div class="panel-body overview-links">
@@ -313,7 +313,8 @@ function renderAi() {
       ${kpi("AI requests", ai.usage?.requests ?? 0, "Last 30 days")}
       ${kpi("Input tokens", ai.usage?.input_tokens || 0, "prompt usage")}
       ${kpi("Output tokens", ai.usage?.output_tokens || 0, "completion usage")}
-      ${kpi("Cost estimate", money(ai.usage?.cost_usd ?? 0), "Last 30 days · USD")}
+      ${kpi("Jobs AI cost", money(ai.usage?.cost_usd ?? 0), "Estimated · last 30 days")}
+      ${kpi("Customer-funded requests", ai.usage?.personal_metered_requests ?? 0, "OpenRouter calls with reported tokens · last 30 days")}
       ${kpi("Providers", (ai.providers || []).filter((p) => p.configured).length, "configured")}
     </div>
     <div class="grid two">
@@ -321,7 +322,8 @@ function renderAi() {
         ${(ai.providers || []).map((p) => `<div class="alert ${p.configured ? "teal" : ""}"><strong>${esc(p.label)}</strong><br><span>${p.configured ? "Configured" : "Missing key"} - ${esc(p.model)}</span></div>`).join("")}
       </div></section>
       <section class="panel"><div class="panel-head"><h2>Usage settings</h2></div><div class="panel-body stack">
-        <p class="helper">This month’s estimated usage is ${money(monthly ?? 0)}. ${budget == null ? "No monthly budget target is saved." : "Budget target " + money(budget) + "."}</p>
+        <p class="helper">At DeepSeek Flash peak, uncached rates, the tokens used on personal accounts in the last 30 days would cost ${money(ai.usage?.personal_comparison_usd ?? 0)}. Actual savings depend on which requests Jobs would have paid for.</p>
+        <p class="helper">This month’s estimated Jobs spend is ${money(monthly ?? 0)}. ${budget == null ? "No monthly budget target is saved." : "Budget target " + money(budget) + "."}</p>
         <form class="workspace-form" data-ai-form>
           <label>Monthly budget target USD <input name="monthly_budget_usd" type="number" min="0" max="100000" step="0.01" value="${esc(budget ?? "")}"></label>
           <label>Daily requests per user target <input name="per_user_daily_limit" type="number" min="0" max="100000" step="1" value="${esc(settings.per_user_daily_limit ?? "")}"></label>
@@ -333,8 +335,8 @@ function renderAi() {
         <p class="helper">These settings record operating targets. Provider routing and enforcement depend on each AI workflow. Configure credentials in Cloudflare.</p>
       </div></section>
     </div>
-    <section class="panel"><div class="panel-head"><h2>Usage by route</h2></div><div class="table-wrap"><table><thead><tr><th>Route</th><th>Provider</th><th>Requests</th><th>Tokens</th><th>Cost</th></tr></thead><tbody>
-      ${(ai.by_route || []).map((r) => `<tr><td>${esc(r.route)}</td><td>${esc(r.provider)}<small>${esc(r.model)}</small></td><td>${r.requests}</td><td>${Number(r.tokens || 0).toLocaleString()}</td><td>${money(r.cost_usd)}</td></tr>`).join("")}
+    <section class="panel"><div class="panel-head"><h2>Usage by route</h2></div><div class="table-wrap"><table><thead><tr><th>Route</th><th>Paid by</th><th>Provider</th><th>Requests</th><th>Tokens</th><th>Jobs cost estimate</th></tr></thead><tbody>
+      ${(ai.by_route || []).map((r) => `<tr><td>${esc(r.route)}</td><td>${r.payer === "customer" ? "Customer" : "Jobs"}</td><td>${r.payer === "customer" ? "OpenRouter" : esc(r.provider)}<small>${esc(r.model)}</small></td><td>${r.requests}</td><td>${Number(r.tokens || 0).toLocaleString()}</td><td>${money(r.cost_usd)}</td></tr>`).join("")}
     </tbody></table></div></section>`;
 }
 
@@ -550,7 +552,9 @@ function pageTitle() {
 }
 
 function money(value) {
-  return `$${Number(value || 0).toFixed(2)}`;
+  const amount = Number(value || 0);
+  if (amount > 0 && amount < 0.0001) return "<$0.0001";
+  return `$${amount.toFixed(amount > 0 && amount < 0.01 ? 4 : 2)}`;
 }
 
 function sar(value) {

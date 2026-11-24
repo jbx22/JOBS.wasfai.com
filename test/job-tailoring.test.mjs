@@ -6,6 +6,7 @@ import { onRequest as workspaceRoute } from "../functions/api/[[route]].js";
 import { readUserState, writeUserState } from "../functions/api/_state.js";
 import { getJobDb } from "../functions/api/_db.js";
 import { sessionCookie } from "../functions/api/auth/_auth.js";
+import { encryptCredential, getUserOpenRouterKey } from "../functions/api/openrouter/_shared.js";
 import { gatewayFixture, testEnv } from "./helpers/gateway.mjs";
 
 const job = { id: "one", title: "Inventory Coordinator", employer: "Riyadh Logistics",
@@ -166,4 +167,51 @@ test("job generation and independent review use the dedicated résumé DeepSeek 
   assert.equal(result.status, 200);
   assert.equal((await result.json()).quality_review.approved, true);
   assert.equal(calls, 2);
+});
+
+test("personal CV and letter requests use one generation and its disclosed review, and preserve drafts when only review credits run out", async t => {
+  const calls = [];
+  const replies = [
+    providerReply({}),
+    providerReply(draft), Response.json({}, { status: 402 }),
+    providerReply(review),
+  ];
+  const { addUser, db } = gatewayFixture(t, { otherFetch(url, init) {
+    calls.push({ url, init, body: JSON.parse(init.body) });
+    return replies.shift();
+  } });
+  addUser();
+  await getUserOpenRouterKey(env, "google-user");
+  db.prepare("INSERT INTO user_openrouter_connections(user_id,credential) VALUES (?,?)")
+    .run("google-user", await encryptCredential(env, "google-user", "tailoring-personal-fixture"));
+  const payload = { job, profile, billing_source: "openrouter_personal", ai_model: "gpt-4.1-mini" };
+  const invalid = await call(generate, payload);
+  assert.equal((await invalid.json()).code, "AI_INVALID_DRAFT");
+  assert.equal(calls.length, 1);
+  const generated = await call(generate, payload);
+  assert.equal(generated.status, 200);
+  const kit = await generated.json();
+  assert.equal(kit.en_cover_letter, draft.en_cover_letter);
+  assert.equal(kit.ar_resume, draft.ar_resume.trim());
+  assert.equal(kit.quality_review.approved, false);
+  assert.equal(kit.review_error_code, "OPENROUTER_CREDITS_REQUIRED");
+  assert.equal(calls.length, 3);
+  const reviewed = await call(generate, { ...payload, review_kit: kit });
+  const receipt = await reviewed.json();
+  assert.equal(receipt.quality_review.approved, true);
+  assert.equal(receipt.inference_provider, "OpenAI");
+  assert.equal(receipt.billing_source, "openrouter_personal");
+  assert.equal(calls.length, 4);
+  for (const item of calls) {
+    assert.equal(item.url, "https://openrouter.ai/api/v1/chat/completions");
+    assert.equal(item.init.headers.Authorization, "Bearer tailoring-personal-fixture");
+    assert.deepEqual(item.body.provider, { only: ["openai"], allow_fallbacks: false });
+    assert.equal(item.body.model, "openai/gpt-4.1-mini");
+  }
+  const usage = db.prepare("SELECT provider, route, status FROM ai_usage ORDER BY id").all();
+  assert.ok(usage.every(row => row.provider === "openrouter_personal"));
+  assert.deepEqual(usage.map(row => [row.route, row.status]), [
+    ["ghostwriter.generate", "invalid_output"], ["ghostwriter.generate", "ok"],
+    ["ghostwriter.review", "provider_error"], ["ghostwriter.review", "ok"],
+  ]);
 });

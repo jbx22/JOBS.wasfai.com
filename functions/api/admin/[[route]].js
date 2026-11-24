@@ -1,4 +1,5 @@
 import { adminJson, audit, auditStatement, ensureAdminSchema, requireAdmin, SERVICE_ADMIN_EMAIL, SUPER_ADMIN_EMAIL } from "../_admin.js";
+import { estimateCost, PERSONAL_OPENROUTER_PROVIDER } from "../_ai_usage.js";
 import { adminWorkspace, paymentTotals } from "../_admin_workspaces.js";
 import { guardedUserBatch, isWriteConflict } from "../_db.js";
 import { DEEPSEEK_LABEL, deepseekModel } from "../_deepseek.js";
@@ -129,7 +130,7 @@ async function subscribers(context) {
       COALESCE(SUM(a.input_tokens + a.output_tokens), 0) AS ai_tokens
     FROM users u
     LEFT JOIN subscriptions s ON s.user_id = u.id
-    LEFT JOIN ai_usage a ON a.user_id = u.id
+    LEFT JOIN ai_usage a ON a.user_id = u.id AND a.provider != '${PERSONAL_OPENROUTER_PROVIDER}'
     GROUP BY u.id, u.email, u.display_name, u.account_status,
       s.plan, s.status, s.ai_monthly_limit_usd, s.current_period_end, s.updated_at
     ORDER BY ai_cost_usd DESC, u.last_login_at DESC
@@ -293,7 +294,7 @@ async function aiManagement(context) {
     since,
     month,
     monthly,
-    by_route: byRoute,
+    by_route: byRoute.map(row => ({ ...row, payer: row.provider === PERSONAL_OPENROUTER_PROVIDER ? "customer" : "jobs" })),
     settings: Object.fromEntries(settings.map((row) => [row.key, row.value])),
   });
 }
@@ -434,7 +435,10 @@ async function ensureUserTable(db) {
 async function usageSummary(db, since = "") {
   const row = await db.prepare(`
     SELECT COUNT(*) AS requests, COALESCE(SUM(input_tokens), 0) AS input_tokens,
-      COALESCE(SUM(output_tokens), 0) AS output_tokens, COALESCE(SUM(cost_usd), 0) AS cost_usd
+      COALESCE(SUM(output_tokens), 0) AS output_tokens, COALESCE(SUM(cost_usd), 0) AS cost_usd,
+      COUNT(CASE WHEN provider = '${PERSONAL_OPENROUTER_PROVIDER}' AND (input_tokens > 0 OR output_tokens > 0) THEN 1 END) AS personal_metered_requests,
+      COALESCE(SUM(CASE WHEN provider = '${PERSONAL_OPENROUTER_PROVIDER}' THEN input_tokens ELSE 0 END), 0) AS personal_input_tokens,
+      COALESCE(SUM(CASE WHEN provider = '${PERSONAL_OPENROUTER_PROVIDER}' THEN output_tokens ELSE 0 END), 0) AS personal_output_tokens
     FROM ai_usage WHERE created_at >= ?
   `).bind(since).first();
   return {
@@ -442,6 +446,8 @@ async function usageSummary(db, since = "") {
     input_tokens: Number(row?.input_tokens || 0),
     output_tokens: Number(row?.output_tokens || 0),
     cost_usd: Number(row?.cost_usd || 0),
+    personal_metered_requests: Number(row?.personal_metered_requests || 0),
+    personal_comparison_usd: estimateCost("deepseek-flash", Number(row?.personal_input_tokens || 0), Number(row?.personal_output_tokens || 0)),
   };
 }
 
