@@ -288,3 +288,7 @@
 
 - Add bilingual vacancy browsing and rank résumé matches using occupational evidence
 
+## jobs77 — 2026-11-24 13:35
+
+- Recover unreadable résumé uploads, strengthen DeepSeek coaching and guide applicants to relevant vacancies
+

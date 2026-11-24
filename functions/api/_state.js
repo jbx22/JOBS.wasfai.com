@@ -53,6 +53,8 @@ const STATE_KEYS = [
 
 export async function getAuthenticatedUser(context) {
   const active = await readActiveSession(context.request, context.env || {});
+  const owner = context.request.headers.get("X-Workspace-User");
+  if (owner && owner !== active?.session?.sub) return null;
   return active?.session || null;
 }
 

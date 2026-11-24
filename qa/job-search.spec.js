@@ -18,9 +18,9 @@ const software = { ...records[0], id: "fixture-software", public_id: "i-fixture-
 const stale = { id: "demo-old", title: "Legacy Rust Example", employer: "Legacy Example", source: "resume-match", score: 99, match_eligible: true, status: "ready" };
 const saved = { id: "kept-by-applicant", title: "Previously saved logistics role", employer: "Example Logistics", source: "manual", imported: true, status: "discovered" };
 
-async function workspace(page, authenticated = true) {
-  const trace = { browse: [], match: [], saves: [], errors: [], unexpected: [], failNextMatch: false };
-  let state = { jobs: [stale, saved], profile, packages: [], approvedMasterResume: false };
+async function workspace(page, authenticated = true, initialProfile = profile, catalogRows = records) {
+  const trace = { browse: [], match: [], details: [], saves: [], errors: [], unexpected: [], failNextMatch: false };
+  let state = { jobs: [stale, saved], profile: initialProfile, packages: [], approvedMasterResume: false };
   page.on("pageerror", error => trace.errors.push(error.message));
   await page.route("**/*", async route => {
     const req = route.request();
@@ -29,7 +29,7 @@ async function workspace(page, authenticated = true) {
     if (!url.pathname.startsWith("/api/")) return route.continue();
     const send = (json, status = 200) => route.fulfill({ json, status });
     switch (url.pathname) {
-      case "/api/bootstrap": return send({ profile: authenticated ? profile : {}, jobs: [stale], packages: [], sources: [] });
+      case "/api/bootstrap": return send({ profile: authenticated ? initialProfile : {}, jobs: [stale], packages: [], sources: [] });
       case "/api/auth/session": return send({ authenticated, user: authenticated ? { sub: "example", name: profile.display_name } : null });
       case "/api/ai-health": return send({ ready: true });
       case "/api/resumes": return send({ file: null });
@@ -40,17 +40,21 @@ async function workspace(page, authenticated = true) {
           trace.saves.push(state);
         }
         return send({ authenticated, state, storage: "postgres-normalized" });
+      case "/api/jobs/detail":
+        trace.details.push({ query: Object.fromEntries(url.searchParams), method: req.method(), body: req.postData() });
+        return send({ description: "Inspect rotating equipment and supervise mechanical commissioning." });
       case "/api/jobs/search":
       case "/api/jobs/match": {
         const matching = url.pathname.endsWith("/match");
         const input = matching ? req.postDataJSON() : Object.fromEntries(url.searchParams);
         const filters = matching ? input.filters : input;
         (matching ? trace.match : trace.browse).push(input);
+        if (matching && !input.profile.target_roles) return send({ ok: false, code: "TARGET_ROLE_REQUIRED" }, 422);
         if (matching && trace.failNextMatch) {
           trace.failNextMatch = false;
           return send({ ok: false, code: "MATCH_UNAVAILABLE" }, 503);
         }
-        const catalog = matching ? records.map(row => ({ ...row, match_eligible: true, score: 87, match_evidence: ["Preventive maintenance"] })) : [...records, software];
+        const catalog = matching ? catalogRows.map(row => ({ ...row, match_eligible: true, score: 87, match_evidence: ["Preventive maintenance"] })) : [...catalogRows, software];
         const filtered = catalog.filter(row => row.title.toLowerCase().includes((filters.q || "").toLowerCase()) && row.location.includes(filters.city || ""));
         const offset = Number(input.offset);
         const limit = Number(input.limit);
@@ -170,4 +174,44 @@ test("the jobs entry starts with résumé matches and remembers a deliberate swi
   await expect(cards.locator(".tag")).toHaveCount(0);
   expect(trace.browse.length).toBeGreaterThanOrEqual(2);
   expect(trace.match).toHaveLength(1);
+});
+
+test("a selected SmartRecruiters vacancy loads official requirements by public ID once", async ({ page }) => {
+  const id = "ksa-aecom2-smartrecruiters-1234";
+  const selected = { ...records[0], id, public_id: "i-" + id, source_id: "ksa-aecom2-smartrecruiters",
+    source_url: "https://jobs.smartrecruiters.com/AECOM2/1234-mechanical-project-engineer",
+    description: "المتطلبات والتقديم في الإعلان الرسمي." };
+  const trace = await workspace(page, true, profile, [selected]);
+  await page.goto("/jobs?view=matches");
+  const card = page.locator(".job-search-card").first();
+  await expect(card).toContainText(selected.title);
+  expect(trace.details).toEqual([]);
+  await card.locator("[data-open-search-job]").click();
+  await page.locator('[data-tab="overview"]').click();
+  await expect(page.locator("[data-official-job-description]")).toHaveText(/rotating equipment.*mechanical commissioning/);
+  await page.locator('[data-tab="resume"]').click();
+  await page.locator('[data-tab="overview"]').click();
+  expect(trace.details).toEqual([{ query: { id: selected.public_id }, method: "GET", body: null }]);
+  expect(trace.errors).toEqual([]);
+  expect(trace.unexpected).toEqual([]);
+});
+
+test("missing role opens the editable target, and damaged source still allows public browsing", async ({ page }) => {
+  const trace = await workspace(page, true, {
+    resume_text: "I enjoy working with my team and have completed several courses over the last year.",
+  });
+  await page.goto("/jobs?view=matches");
+  await page.locator("[data-edit-match-role]").click();
+  await expect(page).toHaveURL(/\/account$/);
+  await expect(page.locator('[data-profile-field="target_roles"]')).toBeFocused();
+  expect(trace.match.at(-1)?.profile.target_roles).toBe("");
+  expect(trace.errors).toEqual([]);
+
+  await page.unroute("**/*");
+  const corrupted = await workspace(page, true, { resume_text: "x Q . x C x , % x zz) contact@example.invalid", resume_filename: "scan.pdf" });
+  await page.goto("/jobs?view=matches");
+  await expect(page.locator(".empty").first()).toContainText(/نحتاج نصاً أوضح|clearer résumé text/);
+  await page.locator(".empty [data-nav='/jobs?view=browse']").click();
+  await expect(page.locator(".job-search-card")).toHaveCount(20);
+  expect(corrupted.match).toEqual([]);
 });

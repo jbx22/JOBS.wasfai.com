@@ -115,3 +115,17 @@ test("an audited manual grant is idempotent and later provider verification neve
   assert.equal(fixture.db.prepare("SELECT status FROM subscription_payments").get().status, "paid");
   assert.equal(fixture.db.prepare("SELECT COUNT(*) AS count FROM audit_logs WHERE action='payment.manual_activate'").get().count, 1);
 });
+
+test("a stale tab cannot write its previous user's workspace after the session switches", async (t) => {
+  const { gatewayFixture, testEnv } = await import("./helpers/gateway.mjs");
+  const { sessionCookie } = await import("../functions/api/auth/_auth.js");
+  const { onRequestPut } = await import("../functions/api/me/state.js");
+  const { addUser } = gatewayFixture(t);
+  addUser();
+  const cookie = (await sessionCookie({ sub: "google-user" }, testEnv.AUTH_COOKIE_SECRET)).split(";")[0];
+  const response = await onRequestPut({ env: testEnv, request: new Request("https://jobs.wasfai.com/api/me/state", {
+    method: "PUT", headers: { Cookie: cookie, "Content-Type": "application/json", "X-Workspace-User": "another-user" },
+    body: JSON.stringify({ state: { profile: { display_name: "Unrelated" } } }),
+  }) });
+  assert.equal(response.status, 401);
+});

@@ -29,12 +29,12 @@ function seedProfile() {
     display_name: "",
     preferred_language: "ar",
     target_roles: "",
-    target_locations: "السعودية، الخليج",
+    target_locations: "",
     resume_filename: "",
     resume_skills: "",
     resume_languages: "",
     resume_seniority: "",
-    resume_regions: "Saudi Arabia, GCC",
+    resume_regions: "",
     resume_work_examples: "",
   };
 }

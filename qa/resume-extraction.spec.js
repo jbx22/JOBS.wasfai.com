@@ -29,3 +29,30 @@ for (const [filename, expected] of [
     expect(external).toEqual([]);
   });
 }
+
+test.describe('mobile PDF text recovery', () => {
+  test.use({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+  for (const filename of ['bilingual-damaged-layer.pdf', 'unrecoverable-layer.pdf']) {
+    test(`handles ${filename} without accepting an email and corrupt hidden layer`, async ({ page, context }) => {
+      test.setTimeout(100_000);
+      await page.goto('/robots.txt');
+      const origin = new URL(page.url()).origin;
+      await context.route('**/*', route => new URL(route.request().url()).origin === origin ? route.continue() : route.abort());
+      await page.evaluate(() => document.body.appendChild(Object.assign(document.createElement('input'), { type: 'file' })));
+      await page.locator('input').setInputFiles(path.join(__dirname, 'fixtures', filename));
+      const result = await page.evaluate(async () => {
+        const { extractResumeFileText } = await import('/resume-extraction.js');
+        try { return { text: await extractResumeFileText(document.querySelector('input').files[0]) }; }
+        catch (error) { return { code: error.code }; }
+      });
+      if (filename === 'unrecoverable-layer.pdf') {
+        expect(result.code).toBe('RESUME_TEXT_DAMAGED');
+      } else {
+        expect(result.text).toContain('الرياض');
+        expect(result.text).toContain('Translation Specialist');
+        expect(result.text).toContain('candidate@example.org');
+        expect(result.text).not.toContain('XQZZRB');
+      }
+    });
+  }
+});

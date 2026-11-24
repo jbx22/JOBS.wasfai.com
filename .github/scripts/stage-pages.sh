@@ -8,6 +8,8 @@ stage=$(mktemp -d "${RUNNER_TEMP:?}/jobs-pages.XXXXXXXX")
 cd "$root"
 mkdir "$stage/site"
 cp -a public/. "$stage/site/"
+mkdir -p "$stage/site/licenses"
+cp workers/ingestion/LICENSE.career-ops "$stage/site/licenses/career-ops.txt"
 ./node_modules/.bin/wrangler pages functions build functions \
   --outdir "$stage/worker" --output-routes-path "$stage/site/_routes.json" \
   --compatibility-date 2026-07-11 --compatibility-flags nodejs_compat

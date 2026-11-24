@@ -46,8 +46,8 @@ test("verified Saudi portals are displayed as direct, non-scraped sources", asyn
 test("guest users can track an application and schedule a follow-up", async ({ page }) => {
   const id = "tracking-example";
   await page.addInitScript((jobId) => {
-    if (!localStorage.getItem("jobs.wasfai.guestWorkspace")) {
-      localStorage.setItem("jobs.wasfai.guestWorkspace", JSON.stringify({
+    if (!sessionStorage.getItem("jobs.guest.v2.jobs")) {
+      sessionStorage.setItem("jobs.guest.v2.jobs", JSON.stringify({
         jobs: [{ id: jobId, title: "Mechanical Supervisor", employer: "Example Engineering", location: "Riyadh", source: "manual", imported: true, source_url: "https://example.org/vacancies/tracking", status: "discovered", score: 0, timeline: [] }],
       }));
     }
