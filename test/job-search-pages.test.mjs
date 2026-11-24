@@ -94,3 +94,28 @@ test('Arabic title queries find bilingual equivalents and keep additional terms 
   assert.deepEqual(await ids({q:'مدير مصنع other-company'}), []);
   assert.deepEqual(await ids({profession:'مهندس ميكانيكي',city:'Dammam'}), ['other-city']);
 });
+
+test('matches distinguish an unreadable résumé, missing title and a verified bilingual match', async t => {
+  const { add, addUser } = catalog(t);
+  const tester = { sub: 'recovery-fixture', email: 'cv-test@example.invalid', name: 'Test Candidate' };
+  addUser('active', tester);
+  add('admin', { title: 'Administrative Assistant', description: 'Schedules appointments and handles office correspondence and data entry.' });
+  add('developer', { title: 'Software Developer', description: 'Develops web applications.' });
+  const broken = 'x D) . x Q x Q a k . Q . Q .\ncontact@example.invalid\n'.repeat(6);
+  const damaged = await match(tester, { profile: { resume_text: broken, target_roles: 'Software Developer' } });
+  assert.equal(damaged.status, 422);
+  assert.equal((await damaged.json()).code, 'RESUME_UNREADABLE');
+  for (const profile of [{}, { resume_text: 'I enjoy working with my team and have completed several courses over the last year.', target_locations: 'Riyadh' }]) {
+    const missing = await match(tester, { profile });
+    assert.equal(missing.status, 422);
+    assert.equal((await missing.json()).code, 'TARGET_ROLE_REQUIRED');
+  }
+  const source = 'مساعدة إدارية\nالخبرات العملية\nنظمت الاجتماعات والمواعيد وأعددت المراسلات والتقارير الأسبوعية لفريق المكتب.\nالمهارات: إدخال البيانات\ncontact@example.invalid';
+  const found = await match(tester, { profile: { resume_text: source } });
+  assert.equal(found.status, 200);
+  const result = await found.json();
+  assert.deepEqual(result.jobs.map(job => job.id), ['admin']);
+  assert.ok(!JSON.stringify(result.profile_terms).includes('contact'));
+  const search = await (await browse({ q: 'مساعدة إدارية' })).json();
+  assert.deepEqual(search.jobs.map(job => job.id), ['admin']);
+});

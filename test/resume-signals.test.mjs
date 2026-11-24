@@ -51,3 +51,29 @@ test("a small amount of extraction noise does not hide a readable document", () 
   assert.equal(readableResumeText("(cid:34)���".repeat(90)), false);
   assert.equal(readableResumeText("%%%%%%% ".repeat(110) + valid), false);
 });
+
+test("service, retail, academic and volunteer applicants keep the evidence actually present", () => {
+  const customer = inferResumeSignals([
+    "Name: Sol Brooks | Occupation: Guest Relations Representative",
+    "City: Doha", "Skills & Tools", "Complaint resolution", "Zendesk",
+    "Volunteer experience", "Answered visitor questions at the community reception desk.",
+  ].join("\n"));
+  assert.equal(customer.display_name, "Sol Brooks");
+  assert.equal(customer.target_roles, "Guest Relations Representative");
+  assert.equal(customer.target_locations, "Doha");
+  assert.equal(customer.resume_skills, "Complaint resolution, Zendesk");
+  assert.equal(customer.resume_seniority, "");
+  assert.match(customer.resume_work_examples, /^Answered visitor questions/);
+
+  const student = inferResumeSignals("Amber Fox\nCommunication Design Student\nAcademic Background\nStudied visual storytelling and typography.\nDigital skills: Adobe Illustrator, Figma");
+  assert.equal(student.target_roles, "Communication Design Student");
+  assert.equal(student.resume_seniority, "Student");
+  assert.equal(student.resume_skills, "Adobe Illustrator, Figma");
+
+  const arabic = inferResumeSignals("ندى صالح\nخريجة نظم معلومات\nالمدينة: حائل\nمهارات التواصل\nمتابعة استفسارات المستفيدين\nالعمل التطوعي\nساعدت الزوار في تسجيل طلباتهم ومتابعة المواعيد");
+  assert.equal(arabic.display_name, "ندى صالح");
+  assert.equal(arabic.target_roles, "خريجة نظم معلومات");
+  assert.equal(arabic.resume_skills, "متابعة استفسارات المستفيدين");
+  assert.equal(arabic.target_locations, "حائل");
+  assert.equal(arabic.resume_languages, "");
+});

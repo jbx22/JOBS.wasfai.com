@@ -2,6 +2,7 @@
 "use strict";
 
 import { inferResumeSignals, readableResumeText } from "./resume-signals.js";
+import { assessResumeText } from "./resume-text-quality.js";
 import { extractResumeFileText, resumeExtractionErrorMessage } from "./resume-extraction.js";
 
 /* ---------------- Constants ---------------- */
@@ -72,12 +73,12 @@ let state = {
     display_name: "",
     preferred_language: "ar",
     target_roles: "",
-    target_locations: "السعودية، الخليج",
+    target_locations: "",
     resume_filename: "",
     resume_skills: "",
     resume_languages: "",
     resume_seniority: "",
-    resume_regions: "Saudi Arabia, GCC",
+    resume_regions: "",
     resume_work_examples: "",
     resume_text: "",
   },
@@ -485,80 +486,48 @@ function aiWriterLabel(id = state.aiWriterModel) {
   return AI_WRITER_MODELS.find((model) => model.id === id)?.label || AI_WRITER_MODELS[0].label;
 }
 
-function loadLocalProfile() {
-  try {
-    const profile = JSON.parse(localStorage.getItem("jobs.wasfai.profile") || "null") || null;
-    if (isLegacyDemoProfile(profile)) {
-      localStorage.removeItem("jobs.wasfai.profile");
-      return null;
-    }
-    return profile;
-  } catch {
-    return null;
-  }
+function accountId() {
+  return state.session?.authenticated ? state.session.user?.sub || "" : "";
 }
 
-function isLegacyDemoProfile(profile) {
-  if (!profile) return false;
-  const combined = [
-    profile.target_roles,
-    profile.resume_skills,
-    profile.resume_filename,
-    profile.resume_work_examples,
-  ].join(" ");
-  return /Rust|Product\s*\/\s*UX|Arabic SaaS|resume\.pdf/i.test(combined) && !String(profile.resume_text || "").trim();
+// Guest drafts belong to this tab. Earlier installations used unowned shared
+// keys for signed-in and guest data; none can be attributed to this guest.
+function guestDraft(name, value) {
+  if (state.session?.authenticated || !guestSessionVerified) return null;
+  try {
+    const key = "jobs.guest.v2." + name;
+    if (value !== undefined) sessionStorage.setItem(key, JSON.stringify(value));
+    else return JSON.parse(sessionStorage.getItem(key) || "null");
+  } catch { /* Storage may be disabled. */ }
+  return null;
+}
+
+function loadLocalProfile() {
+  return guestDraft("profile");
 }
 
 function sanitizeLegacyProfile(profile = {}) {
-  if (!isLegacyDemoProfile(profile)) return profile;
-  return {
-    ...profile,
-    display_name: "",
-    target_roles: "",
-    resume_filename: "",
-    resume_skills: "",
-    resume_seniority: "",
-    resume_work_examples: "",
-    target_locations: profile.target_locations || "السعودية، الخليج",
-    resume_regions: profile.resume_regions || "Saudi Arabia, GCC",
-  };
+  if (profile.resume_text?.trim() || profile.target_roles !== "Rust / Product / UX"
+      || profile.resume_skills !== "Rust, Product operations, UX, Arabic SaaS" || profile.resume_filename !== "resume.pdf") return profile;
+  return { ...profile, display_name: state.session?.user?.name || "", target_roles: "", target_locations: "",
+    resume_filename: "", resume_skills: "", resume_languages: "", resume_seniority: "", resume_regions: "", resume_work_examples: "" };
 }
 
 function saveLocalProfile(profile) {
-  try {
-    localStorage.setItem("jobs.wasfai.profile", JSON.stringify(profile));
-  } catch {
-    // Storage can be unavailable in private browsing; the in-memory state still works.
-  }
+  guestDraft("profile", profile);
   saveWorkspaceState();
 }
 
 function loadLocalAiWriterState() {
-  try {
-    return JSON.parse(localStorage.getItem("jobs.wasfai.aiWriter") || "null") || null;
-  } catch {
-    return null;
-  }
+  return guestDraft("writer");
 }
 
 function saveLocalAiWriterState() {
-  try {
-    localStorage.setItem(
-      "jobs.wasfai.aiWriter",
-      JSON.stringify({
-        aiWriterModel: state.aiWriterModel,
-        ghostwriter: state.ghostwriter,
-        approvedKits: state.approvedKits,
-        interviewChats: state.interviewChats,
-        resumeCoach: state.resumeCoach,
-        approvedMasterResume: state.approvedMasterResume,
-        masterResume: state.masterResume,
-        tailoringBriefs: state.tailoringBriefs,
-      }),
-    );
-  } catch {
-    // Keep session state even if localStorage is blocked.
-  }
+  guestDraft("writer", {
+    aiWriterModel: state.aiWriterModel, ghostwriter: state.ghostwriter, approvedKits: state.approvedKits,
+    interviewChats: state.interviewChats, resumeCoach: state.resumeCoach, approvedMasterResume: state.approvedMasterResume,
+    masterResume: state.masterResume, tailoringBriefs: state.tailoringBriefs,
+  });
   saveWorkspaceState();
 }
 
@@ -586,19 +555,22 @@ function workspacePayload() {
   };
 }
 
+let guestSessionVerified = false;
+let workspaceOwner = "";
 let saveWorkspaceTimer;
 let workspaceSaving = false;
 let workspaceSaveQueued = false;
 
 function saveWorkspaceState() {
-  if (!state.session?.authenticated) return;
+  if (!workspaceOwner || accountId() !== workspaceOwner) return;
   clearTimeout(saveWorkspaceTimer);
   state.persistence = { ...(state.persistence || {}), pending: true };
   saveWorkspaceTimer = setTimeout(flushWorkspaceState, 500);
 }
 
 async function flushWorkspaceState() {
-  if (!state.session?.authenticated) return;
+  const owner = accountId();
+  if (!owner || owner !== workspaceOwner) return;
   if (workspaceSaving) {
     workspaceSaveQueued = true;
     return;
@@ -606,13 +578,15 @@ async function flushWorkspaceState() {
   workspaceSaving = true;
   let conflict = false;
   try {
-    const response = await fetch("/api/me/state", {
+    const response = await accountFetch("/api/me/state", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ state: workspacePayload(), revisions: state.__revisions || {} }),
     });
+    if (accountId() !== owner) return;
     if (response.ok) {
       const payload = await response.json();
+      if (accountId() !== owner || payload.user?.sub && payload.user.sub !== owner) return;
       state.__revisions = payload.state?.__revisions || state.__revisions || {};
       state.persistence = { storage: payload.storage || "postgres-normalized", pending: false, last_saved_at: new Date().toISOString() };
     } else {
@@ -620,7 +594,7 @@ async function flushWorkspaceState() {
       showWorkspaceSaveError(conflict);
     }
   } catch {
-    showWorkspaceSaveError(false);
+    if (accountId() === owner) showWorkspaceSaveError(false);
   } finally {
     workspaceSaving = false;
     if (workspaceSaveQueued && !conflict) saveWorkspaceState();
@@ -638,23 +612,28 @@ function showWorkspaceSaveError(conflict) {
 }
 
 async function loadWorkspaceState() {
-  if (!state.session?.authenticated) return;
+  const owner = accountId();
+  if (!owner) return;
   try {
-    const response = await fetch("/api/me/state");
-    if (!response.ok) return;
+    const response = await accountFetch("/api/me/state", { cache: "no-store" });
+    if (!response.ok) throw new Error("Account data unavailable");
     const payload = await response.json();
-    if (payload.state) {
-      state = { ...state, ...payload.state, session: state.session, persistence: { storage: payload.storage || "d1", pending: false, last_saved_at: "" } };
-    }
+    if (accountId() !== owner) return;
+    if (!payload.state || payload.user?.sub && payload.user.sub !== owner) throw new Error("Workspace unavailable");
+    state = { ...state, ...payload.state, session: state.session, persistence: { storage: payload.storage || "d1", pending: false, last_saved_at: "" } };
+    workspaceOwner = owner;
   } catch {
-    state.persistence = { ...(state.persistence || {}), storage: "guest" };
+    if (accountId() !== owner) return;
+    workspaceOwner = "";
+    state.persistence = { storage: "load-failed", pending: false };
+    state.action = { pending: "", message: "", error: "تعذر تحميل بيانات حسابك. حدّث الصفحة لاستعادة سيرتك قبل الحفظ." };
   }
 }
 
 async function loadResumeFile() {
   if (!state.session?.authenticated) return;
   try {
-    const response = await fetch("/api/resumes", { cache: "no-store" });
+    const response = await accountFetch("/api/resumes", { cache: "no-store" });
     if (response.ok) state.resumeFile = (await response.json()).file || null;
   } catch {
     state.resumeFile = null;
@@ -665,7 +644,7 @@ async function uploadResumeFile(file) {
   if (!state.session?.authenticated) return null;
   const form = new FormData();
   form.append("file", file, file.name);
-  const response = await fetch("/api/resumes", { method: "POST", body: form });
+  const response = await accountFetch("/api/resumes", { method: "POST", body: form });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(payload.error || "Secure resume upload failed.");
   if (!payload.file?.id) throw new Error("Resume storage returned no file.");
@@ -678,11 +657,12 @@ async function importProfileResume(file, savedFile = null) {
   const account = state.session?.user?.sub;
   const previousText = state.profile?.resume_text;
   const progress = (message) => {
+    checkContext();
     state.action = { pending: "resume-upload", message, error: "" };
     render();
   };
   const checkContext = () => {
-    if (account !== state.session?.user?.sub || previousText !== state.profile?.resume_text) {
+    if (account !== state.session?.user?.sub || previousText !== state.profile?.resume_text || savedFile && savedFile.id !== state.resumeFile?.id) {
       const error = new Error("Source changed during extraction");
       error.code = "RESUME_CHANGED";
       throw error;
@@ -691,26 +671,27 @@ async function importProfileResume(file, savedFile = null) {
   try {
     progress("جاري قراءة ملف السيرة…");
     if (savedFile) {
-      const response = await fetch(`/api/resumes/${encodeURIComponent(savedFile.id)}`, { cache: "no-store" });
+      const response = await accountFetch(`/api/resumes/${encodeURIComponent(savedFile.id)}`, { cache: "no-store" });
       if (!response.ok) throw Object.assign(new Error(), { code: "SAVED_FILE_UNAVAILABLE" });
       file = new File([await response.blob()], savedFile.name, { type: savedFile.content_type });
     }
     const text = await extractResumeFileText(file, progress);
-    if (!readableResumeText(text)) throw Object.assign(new Error(), { code: "OCR_UNREADABLE" });
+    if (!readableResumeText(text)) throw Object.assign(new Error(), { code: "RESUME_TEXT_DAMAGED" });
     checkContext();
     let storageFailed = false;
     if (!savedFile && state.session?.authenticated) {
       progress("جاري حفظ الملف الأصلي مشفراً…");
       try {
         const stored = await uploadResumeFile(file);
-        if (account === state.session?.user?.sub) state.resumeFile = stored;
+        checkContext();
+        state.resumeFile = stored;
       } catch {
         storageFailed = true;
       }
     }
     checkContext();
     if (previousText !== text) resetResumeCoach();
-    applyResumeSignalsFromText(text);
+    applyResumeSignalsFromText(text, previousText === text);
     state.profile.resume_filename = file.name;
     saveLocalProfile(state.profile);
     saveLocalAiWriterState();
@@ -729,18 +710,26 @@ async function importProfileResume(file, savedFile = null) {
 }
 
 function originalResumeReady(profile = state.profile) {
-  return readableResumeText(profile?.resume_text);
+  return assessResumeText(profile?.resume_text).readable;
+}
+
+function approvedImprovement() {
+  const master = state.masterResume || {};
+  return Boolean(originalResumeReady() && state.approvedMasterResume && master.source !== "original"
+    && readableResumeText(master.ar) && readableResumeText(master.en));
 }
 
 function masterResumeReady() {
-  return Boolean(
-    state.approvedMasterResume &&
-      (readableResumeText(state.masterResume?.ar) || readableResumeText(state.masterResume?.en) || originalResumeReady()),
-  );
+  return Boolean(originalResumeReady() && state.approvedMasterResume);
+}
+
+function usableCoachDraft(coach = state.resumeCoach) {
+  return Boolean(originalResumeReady() && coach?.provider === "deepseek"
+    && readableResumeText(coach.ar_master_resume) && readableResumeText(coach.en_master_resume));
 }
 
 function approvedProfile() {
-  const master = state.approvedMasterResume ? state.masterResume || {} : {};
+  const master = approvedImprovement() ? state.masterResume : {};
   return {
     ...(state.profile || {}),
     master_resume_ar: master.ar || "",
@@ -801,10 +790,10 @@ function workspaceJobs() {
 
 function approvedMatchingProfile() {
   const profile = state.profile || {};
-  const master = state.approvedMasterResume ? state.masterResume || {} : {};
+  const master = approvedImprovement() ? state.masterResume : {};
   const source = profile.resume_text || master.en || master.ar || "";
   const extracted = (!profile.target_roles || !profile.resume_skills) && source ? inferResumeSignals(source) : {};
-  const coachProfile = state.resumeCoach?.search_profile || {};
+  const coachProfile = usableCoachDraft() ? state.resumeCoach.search_profile || {} : {};
   const targetTitles = Array.isArray(coachProfile.target_titles) ? coachProfile.target_titles.join(", ") : "";
   const keywords = Array.isArray(coachProfile.keywords) ? coachProfile.keywords.join(", ") : "";
   const locations = Array.isArray(coachProfile.locations) ? coachProfile.locations.join(", ") : "";
@@ -816,8 +805,8 @@ function approvedMatchingProfile() {
     resume_seniority: profile.resume_seniority || extracted.resume_seniority || coachProfile.seniority || "",
     resume_regions: profile.resume_regions || extracted.resume_regions || "",
     resume_text: state.profile?.resume_text || "",
-    master_resume_ar: state.approvedMasterResume ? state.masterResume?.ar || "" : "",
-    master_resume_en: state.approvedMasterResume ? state.masterResume?.en || "" : "",
+    master_resume_ar: master.ar || "",
+    master_resume_en: master.en || "",
   };
 }
 
@@ -976,23 +965,48 @@ function profileCompleteness(profile = state.profile) {
 function applyResumeSignalsFromText(text, preserveEdits = false) {
   const current = state.profile || {};
   const signals = inferResumeSignals(text);
-  if (preserveEdits) {
-    for (const field of Object.keys(signals)) {
-      if (current[field]?.trim()) signals[field] = current[field];
+  const changed = current.resume_text !== text;
+  const previous = changed && originalResumeReady(current) ? inferResumeSignals(current.resume_text) : {};
+  const editedFields = new Set(current.resume_edited_fields || []);
+  for (const field of Object.keys(signals)) {
+    const prior = current[field]?.trim();
+    const preference = ["target_roles", "target_locations", "resume_regions"].includes(field);
+    if (editedFields.has(field) || preserveEdits && prior && !changed
+        || preference && prior && previous[field] !== undefined && prior !== previous[field]) {
+      signals[field] = current[field] || "";
+    } else if (!signals[field] && prior && !previous[field] && !current.resume_text) {
+      signals[field] = prior;
     }
   }
   state.profile = {
     ...current,
     ...signals,
-    display_name: signals.display_name || current.display_name || "",
-    target_roles: signals.target_roles || current.target_roles || "",
-    target_locations: signals.target_locations || current.target_locations || "",
+    display_name: signals.display_name || state.session?.user?.name || "",
     resume_text: text,
   };
 }
 
 function jobById(id) {
   return workspaceJobs().find((x) => x.id === id);
+}
+
+const selectedPostingRequests = new Map();
+async function loadSelectedPosting(job) {
+  const id = job.public_id;
+  const original = job.description;
+  if (!/^i-ksa-[a-z0-9]+-smartrecruiters-\d+$/u.test(id || "") ||
+      (original && original !== "المتطلبات والتقديم في الإعلان الرسمي.")) return;
+  let entry = selectedPostingRequests.get(id);
+  if (!entry || entry.until <= Date.now()) {
+    entry = { until: Date.now() + 300000, request: apiJson("/api/jobs/detail?id=" + encodeURIComponent(id)).catch(() => null) };
+    selectedPostingRequests.set(id, entry);
+  }
+  const detail = await entry.request;
+  if (detail?.description && detail.description !== original && job.description === original) {
+    job.description = detail.description;
+    const current = document.querySelector("[data-official-job-description]");
+    if (current?.dataset.officialJobDescription === job.id) current.textContent = job.description;
+  }
 }
 
 function sameSourceJobs(job, limit = 3) {
@@ -1010,27 +1024,11 @@ function replaceJob(updated) {
 }
 
 function saveGuestWorkspace() {
-  try {
-    localStorage.setItem(
-      "jobs.wasfai.guestWorkspace",
-      JSON.stringify({
-        jobs: state.jobs,
-        packages: state.packages,
-        drafts: state.drafts,
-        sources: state.sources,
-      }),
-    );
-  } catch {
-    // Keep in memory if storage is unavailable.
-  }
+  guestDraft("jobs", { jobs: state.jobs, packages: state.packages, drafts: state.drafts, sources: state.sources });
 }
 
 function loadGuestWorkspace() {
-  try {
-    return JSON.parse(localStorage.getItem("jobs.wasfai.guestWorkspace") || "null") || null;
-  } catch {
-    return null;
-  }
+  return guestDraft("jobs");
 }
 
 function persistWorkState() {
@@ -1115,8 +1113,16 @@ function filteredJobs() {
 }
 
 /* ---------------- API ---------------- */
+function accountFetch(path, options = {}) {
+  const headers = new Headers(options.headers);
+  const owner = accountId();
+  if (owner) headers.set("X-Workspace-User", owner);
+  else if (guestSessionVerified) headers.set("X-Workspace-User", "!guest");
+  return fetch(path, { ...options, headers });
+}
+
 async function apiJson(path, options = {}) {
-  const response = await fetch(path, {
+  const response = await accountFetch(path, {
     headers: { "Content-Type": "application/json", ...(options.headers || {}) },
     ...options,
   });
@@ -1129,7 +1135,7 @@ async function apiJson(path, options = {}) {
 }
 
 async function apiNoContent(path, options = {}) {
-  const response = await fetch(path, {
+  const response = await accountFetch(path, {
     headers: { "Content-Type": "application/json", ...(options.headers || {}) },
     ...options,
   });
@@ -1564,8 +1570,13 @@ function renderJobsList() {
   let content;
   if (matching && (!state.session?.authenticated || !matchingReady())) {
     const guest = !state.session?.authenticated;
-    content = `<div class="empty"><p>${guest ? (en ? "Sign in to search with your résumé." : "سجّل الدخول للبحث باستخدام سيرتك.") : (en ? "Upload or paste your résumé to find matching vacancies." : "ارفع سيرتك أو الصقها للبحث عن وظائف تناسب خبراتك.")}</p>
-      <button class="btn primary" data-nav="${guest ? "/login" : "/account"}">${guest ? (en ? "Sign in" : "تسجيل الدخول") : (en ? "Add résumé" : "إضافة السيرة")}</button></div>`;
+    const hasSource = Boolean(state.profile?.resume_text?.trim() || state.profile?.resume_filename);
+    const message = guest ? (en ? "Sign in to search with your résumé." : "سجّل الدخول للبحث باستخدام سيرتك.")
+      : hasSource ? (en ? "We need clearer résumé text to find matches. Re-read your file or paste its text." : "نحتاج نصاً أوضح لمطابقة سيرتك. أعد استخراج الملف أو الصق نص السيرة.")
+      : (en ? "Upload or paste your résumé to find matching vacancies." : "ارفع سيرتك أو الصقها للبحث عن وظائف تناسب خبراتك.");
+    content = `<div class="empty"><p>${message}</p>
+      <button class="btn primary" data-nav="${guest ? "/login" : "/account"}">${guest ? (en ? "Sign in" : "تسجيل الدخول") : hasSource ? (en ? "Review résumé" : "مراجعة السيرة") : (en ? "Add résumé" : "إضافة السيرة")}</button>
+      <button class="btn outline" data-nav="${searchUrl("browse")}">${en ? "Browse all vacancies" : "تصفح جميع الشواغر"}</button></div>`;
   } else {
     const key = JSON.stringify([mode, filters, offset, asOf, profileKey]);
     if (key !== searchPage.key) {
@@ -1576,13 +1587,20 @@ function renderJobsList() {
     const page = searchPage;
     if (page.pending) content = `<p role="status" class="empty">${en ? "Searching vacancies…" : "جاري البحث عن الوظائف…"}</p>`;
     else if (page.error) {
-      const profileNeeded = ["PROFILE_REQUIRED", "RESUME_REQUIRED"].includes(page.error);
-      content = `<div role="alert" class="empty"><p>${profileNeeded ? (en ? "Add a target role in your profile so we can match your résumé." : "أضف مسمى مستهدفاً في ملفك لتحديد الوظائف المناسبة.") : (en ? "Job search is temporarily unavailable." : "تعذّر الاتصال بخدمة البحث عن الوظائف.")}</p>
-        <button class="btn outline" ${profileNeeded ? 'data-nav="/account"' : "data-retry-job-search"}>${profileNeeded ? (en ? "Edit profile" : "تعديل الملف") : (en ? "Try again" : "إعادة المحاولة")}</button></div>`;
+      const needsRole = ["PROFILE_REQUIRED", "TARGET_ROLE_REQUIRED"].includes(page.error);
+      const needsResume = ["RESUME_REQUIRED", "RESUME_UNREADABLE"].includes(page.error);
+      const message = needsRole ? (en ? "Which job title should we search for? Add one to your profile." : "ما المسمى الوظيفي الذي تريد البحث عنه؟ أضفه إلى ملفك.")
+        : needsResume ? (en ? "Re-read the saved file or paste readable résumé text to find matches." : "أعد استخراج الملف المحفوظ أو الصق نصاً واضحاً للبحث عن وظائف تناسبك.")
+        : (en ? "Job search is temporarily unavailable." : "تعذّر الاتصال بخدمة البحث عن الوظائف.");
+      content = `<div role="alert" class="empty"><p>${message}</p>
+        ${needsRole ? `<button class="btn primary" data-edit-match-role>${en ? "Enter target job title" : "إدخال المسمى المستهدف"}</button>` : needsResume ? `<button class="btn primary" data-nav="/account">${en ? "Review résumé" : "مراجعة السيرة"}</button>` : `<button class="btn outline" data-retry-job-search>${en ? "Try again" : "إعادة المحاولة"}</button>`}
+        ${matching ? `<button class="btn outline" data-nav="${searchUrl("browse")}">${en ? "Browse all vacancies" : "تصفح جميع الشواغر"}</button>` : ""}</div>`;
     } else {
       const count = page.jobs.length;
       content = count ? `<p class="muted tiny" role="status">${en ? "Showing" : "عرض"} ${offset + 1}–${offset + count} ${en ? "of" : "من"} ${page.total}</p><div class="list">${page.jobs.map(job => publicJobCard(job, matching)).join("")}</div>`
         : `<p class="empty" role="status">${matching ? (en ? "No verified vacancies match this résumé and these filters." : "لا توجد شواغر موثقة تطابق سيرتك والمرشحات الحالية.") : (en ? "No vacancies match these filters." : "لا توجد شواغر تطابق هذه المرشحات.")}</p>`;
+      if (matching && !count) content += `<div class="row"><button class="btn outline" data-edit-match-role>${en ? "Edit target job title" : "تعديل المسمى المستهدف"}</button>
+        <button class="btn outline" data-nav="${searchUrl("browse")}">${en ? "Browse all vacancies" : "تصفح جميع الشواغر"}</button></div>`;
       const paging = (cursor, label) => `<button class="btn outline" data-nav="${esc(searchUrl(mode, filters, cursor, page.asOf))}">${label}</button>`;
       content += `<nav class="row vacancy-paging">${offset ? paging(Math.max(0, offset - PAGE_SIZE), en ? "Previous" : "السابق") : ""}${page.next !== null ? paging(page.next, en ? "Next" : "التالي") : ""}</nav>`;
     }
@@ -1719,6 +1737,7 @@ function renderJobDetail(id) {
   if (!job) {
     return shell(`<div class="section empty"><p>${state.locale === "en" ? "This job is unavailable in your workspace." : "هذه الوظيفة غير متاحة في قائمتك."}</p><button class="btn primary" data-nav="/jobs">${esc(tr("searchJobs"))}</button></div>`, { screen: "job-detail" });
   }
+  void loadSelectedPosting(job);
   const tone = job.score >= 80 ? "" : job.score >= 60 ? "gold" : "danger";
   const related = sameSourceJobs(job, 3);
   const pkg = packageFor(job.id);
@@ -1731,7 +1750,7 @@ function renderJobDetail(id) {
   const overview = `<div class="tab-panel">
     <div class="section-block">
       <h3>ملخص الوظيفة</h3>
-      <p class="lede">${esc(job.description)}</p>
+      <p class="lede" data-official-job-description="${esc(job.id)}">${esc(job.description)}</p>
       <div class="tags">
         ${job.employment_type ? `<span class="tag teal">${esc(job.employment_type)}</span>` : ""}
         <span class="tag gold">${esc(sourceLabel(job.source))}</span>
@@ -2252,22 +2271,33 @@ function renderOnboarding() {
   );
 }
 
+const RESUME_DERIVED_FIELDS = ["display_name", "target_roles", "resume_languages", "resume_skills", "resume_seniority", "resume_work_examples"];
+
 function renderAccount() {
   void restoreRecentMatches();
-  const p = state.profile || {};
-  const initials = (p.display_name || "ض").trim().slice(0, 1);
+  const p = { ...(state.profile || {}) };
+  if (p.resume_text?.trim() && !originalResumeReady(p)) {
+    for (const key of RESUME_DERIVED_FIELDS) {
+      if (!p.resume_edited_fields?.includes(key)) p[key] = "";
+    }
+  }
+  const displayName = p.display_name || state.session?.user?.name || "";
+  const initials = (displayName || "ض").trim().slice(0, 1);
   const completeness = profileCompleteness(p);
   const resumeReady = originalResumeReady(p);
+  const sourcePresent = Boolean(p.resume_text?.trim());
+  const repairSource = sourcePresent && !resumeReady;
+  const sourceStatus = resumeReady ? "نص السيرة جاهز" : repairSource ? "النص يحتاج إلى إعادة استخراج" : "أضف السيرة";
   shell(
     `${banner()}
     <header class="section" style="padding-top:14px">
       <div class="row account-hero">
         <div class="avatar lg">${esc(initials)}</div>
         <div class="account-title">
-          <h1 style="font-size:20px;font-weight:800;color:var(--ink)">${esc(p.display_name || "مستخدم جديد")}</h1>
+          <h1 style="font-size:20px;font-weight:800;color:var(--ink)">${esc(displayName || "مستخدم جديد")}</h1>
           <p class="muted tiny" style="margin-top:2px">${esc(p.target_roles || "")}</p>
         </div>
-        <span class="badge ${resumeReady ? "" : "muted"}">${resumeReady ? "السيرة جاهزة" : "أضف السيرة"}</span>
+        <span class="badge ${resumeReady ? "" : "muted"}">${sourceStatus}</span>
       </div>
     </header>
     <section class="section">
@@ -2284,7 +2314,7 @@ function renderAccount() {
         </div>
         <div class="profile-meter"><span style="width:${completeness}%"></span></div>
         <div class="tags">
-          <span class="tag ${resumeReady ? "teal" : "gold"}">${resumeReady ? "السيرة الأصلية محفوظة" : "السيرة الأصلية ناقصة"}</span>
+          <span class="tag ${resumeReady ? "teal" : "gold"}">${sourceStatus}</span>
           <span class="tag outline">${esc(p.resume_filename || "بدون ملف")}</span>
           ${p.resume_languages ? `<span class="tag outline">${esc(p.resume_languages)}</span>` : ""}
         </div>
@@ -2321,20 +2351,21 @@ function renderAccount() {
           </div>
           <div class="field">
             <label>اسم ملف السيرة</label>
-            <input data-profile-field="resume_filename" value="${esc(p.resume_filename || "")}" placeholder="jaber-cv.pdf" />
+            <input data-profile-field="resume_filename" value="${esc(p.resume_filename || "")}" placeholder="resume.pdf" />
           </div>
           <div class="field">
             <label>لصق السيرة الأصلية</label>
-            <textarea class="resume-editor" data-profile-field="resume_text" data-original-resume placeholder="الصق النص الكامل للسيرة هنا... الخبرات، الإنجازات، التعليم، الشهادات، المهارات، واللغات.">${esc(p.resume_text || "")}</textarea>
+            <textarea class="resume-editor" data-profile-field="resume_text" data-original-resume ${repairSource ? "data-damaged-source" : ""} placeholder="الصق النص الكامل للسيرة هنا... الخبرات، الإنجازات، التعليم، الشهادات، المهارات، واللغات.">${esc(p.resume_text || "")}</textarea>
           </div>
+          <p class="empty compact" data-source-recovery ${repairSource ? "" : "hidden"}>${resumeRecoveryMessage()}</p>
           <div class="row profile-actions">
-            <button class="btn outline" data-profile-autofill>${iconSpark()} استخراج بيانات السيرة</button>
-            <button class="btn primary" data-approve-uploaded-resume>${iconCheck()} استخدام السيرة للمطابقة</button>
+            <button class="btn outline" data-profile-autofill ${resumeReady && !state.resumeImportPending ? "" : "disabled"}>${iconSpark()} استخراج بيانات السيرة</button>
+            <button class="btn primary" data-approve-uploaded-resume ${resumeReady && !state.resumeImportPending ? "" : "disabled"}>${iconCheck()} استخدام السيرة للمطابقة</button>
           </div>
           ${state.resumeFile ? `
             <div class="row profile-actions" data-secure-resume-file>
               <span class="tag teal">${esc(state.resumeFile.name)}</span>
-              <button class="btn outline sm" data-reextract-resume ${state.resumeImportPending ? "disabled" : ""}>استخراج النص من الملف المحفوظ</button>
+              <button class="btn outline sm" data-reextract-resume ${state.resumeImportPending ? "disabled" : ""}>${repairSource ? "إعادة استخراج السيرة من الملف المحفوظ" : "استخراج النص من الملف المحفوظ"}</button>
               <a class="btn outline sm" href="${esc(state.resumeFile.download_url)}">تنزيل الملف الأصلي</a>
               <button class="btn outline sm" data-delete-resume-file="${esc(state.resumeFile.id)}">حذف الملف الأصلي</button>
             </div>
@@ -2348,12 +2379,12 @@ function renderAccount() {
         <h3>بيانات البحث والتخصيص</h3>
         <div class="form profile-form">
           <div class="field"><label>الاسم</label><input data-profile-field="display_name" value="${esc(p.display_name || "")}" placeholder="اسم المشترك" /></div>
-          <div class="field"><label>الأدوار المستهدفة</label><input data-profile-field="target_roles" value="${esc(p.target_roles || "")}" placeholder="Industrial consultant, factory developer, project director" /></div>
-          <div class="field"><label>مواقع البحث</label><input data-profile-field="target_locations" value="${esc(p.target_locations || "")}" placeholder="Saudi Arabia, GCC, Remote" /></div>
-          <div class="field"><label>المهارات الأساسية</label><textarea data-profile-field="resume_skills" placeholder="PMP, PMI-RMP, factory design, CAPEX, O&M, stakeholder management">${esc(p.resume_skills || "")}</textarea></div>
-          <div class="field"><label>اللغات</label><input data-profile-field="resume_languages" value="${esc(p.resume_languages || "")}" placeholder="Arabic, English" /></div>
-          <div class="field"><label>مستوى الخبرة</label><input data-profile-field="resume_seniority" value="${esc(p.resume_seniority || "")}" placeholder="Senior / Director / Consultant" /></div>
-          <div class="field"><label>الأسواق والمناطق</label><input data-profile-field="resume_regions" value="${esc(p.resume_regions || "")}" placeholder="Saudi Arabia, GCC, MENA" /></div>
+          <div class="field"><label>الأدوار المستهدفة</label><input data-profile-field="target_roles" value="${esc(p.target_roles || "")}" placeholder="المسميات الوظيفية التي ترغب فيها" /></div>
+          <div class="field"><label>مواقع البحث</label><input data-profile-field="target_locations" value="${esc(p.target_locations || "")}" placeholder="المدن أو الدول المرغوبة" /></div>
+          <div class="field"><label>المهارات الأساسية</label><textarea data-profile-field="resume_skills" placeholder="اكتب المهارات التي تدعمها سيرتك">${esc(p.resume_skills || "")}</textarea></div>
+          <div class="field"><label>اللغات</label><input data-profile-field="resume_languages" value="${esc(p.resume_languages || "")}" placeholder="اللغات التي تتحدثها" /></div>
+          <div class="field"><label>مستوى الخبرة</label><input data-profile-field="resume_seniority" value="${esc(p.resume_seniority || "")}" placeholder="مستوى الخبرة المذكور في سيرتك" /></div>
+          <div class="field"><label>الأسواق والمناطق</label><input data-profile-field="resume_regions" value="${esc(p.resume_regions || "")}" placeholder="المناطق التي تستهدفها" /></div>
           <div class="field"><label>أمثلة إنجازات</label><textarea data-profile-field="resume_work_examples" placeholder="اكتب 3-6 إنجازات قابلة للقياس من سيرتك الأصلية.">${esc(p.resume_work_examples || "")}</textarea></div>
           <button class="btn primary full" data-save-profile>${iconCheck()} حفظ السيرة والملف</button>
         </div>
@@ -2404,12 +2435,22 @@ function renderAuthPanel() {
   </div>`;
 }
 
+function resumeRecoveryMessage() {
+  return state.resumeFile
+    ? "النص المحفوظ غير مقروء بما يكفي. أعد استخراجه من الملف المحفوظ أدناه، أو الصق نصاً واضحاً قبل التحسين والمطابقة."
+    : "النص غير مقروء بما يكفي. أعد رفع ملف PDF أو Word، أو الصق نص السيرة قبل التحسين والمطابقة.";
+}
+
 function renderResumeCoach() {
   const ready = readableResumeText(state.profile?.resume_text);
   const signedIn = state.session?.authenticated;
   const pending = state.resumeCoachPending;
-  const coach = state.resumeCoach || null;
-  const approved = masterResumeReady();
+  const coach = ready && state.resumeCoach?.provider === "deepseek" ? state.resumeCoach : null;
+  const approved = approvedImprovement();
+  const complete = usableCoachDraft(coach);
+  const badge = !ready && state.profile?.resume_text?.trim() ? "النص يحتاج إلى إعادة استخراج"
+    : approved ? "نسخة DeepSeek معتمدة" : coach ? "مسودة DeepSeek تحتاج مراجعة"
+      : masterResumeReady() ? "السيرة الأصلية معتمدة للمطابقة" : "لم تُنشأ نسخة محسّنة";
   const searchProfile = coach?.search_profile || {};
   const keywords = Array.isArray(searchProfile.keywords) ? searchProfile.keywords : [];
   const titles = Array.isArray(searchProfile.target_titles) ? searchProfile.target_titles : [];
@@ -2422,15 +2463,15 @@ function renderResumeCoach() {
             <h3>مدرب السيرة بالذكاء الاصطناعي</h3>
             <p class="muted tiny">ينشئ DeepSeek نسخة عربية وأخرى إنجليزية من خبراتك ومؤهلاتك. اختر السيرة الكاملة أو خصّصها لإعلان وظيفة.</p>
           </div>
-          <span class="badge ${approved ? "" : "muted"}" data-coach-approval>${approved ? "السيرة معتمدة" : "تحتاج اعتماد"}</span>
+          <span class="badge ${approved ? "" : "muted"}" data-coach-approval>${badge}</span>
         </div>
         <div class="resume-flow">
           <span class="${ready ? "done" : ""}" data-coach-input-step>1. رفع السيرة</span>
-          <span class="${coach ? "done" : ""}">2. تحسين</span>
-          <span class="${approved ? "done" : ""}">3. اعتماد</span>
-          <span class="${approved ? "done" : ""}">4. بحث وتخصيص</span>
+          <span class="${complete ? "done" : ""}">2. تحسين DeepSeek</span>
+          <span class="${approved ? "done" : ""}">3. اعتماد النسخة المحسنة</span>
+          <span class="${ready && signedIn ? "done" : ""}" data-matching-ready>بحث وتخصيص</span>
         </div>
-        <div class="empty compact" data-coach-input-hint ${ready ? "hidden" : ""}>الصق السيرة الأصلية أو ارفعها أولاً. المدرب يحتاج نصاً واضحاً قبل التحسين.</div>
+        <div class="empty compact" data-coach-input-hint ${ready ? "hidden" : ""}>${state.profile?.resume_text?.trim() ? resumeRecoveryMessage() : "ارفع السيرة الأصلية أو الصق نصها أولاً."}</div>
         ${signedIn ? "" : `<div class="empty compact">سجّل الدخول لاستخدام مدرب السيرة.</div>`}
         ${coach ? `
           <div class="coach-grid" data-coach-draft>
@@ -2456,7 +2497,7 @@ function renderResumeCoach() {
         ` : ""}
         <div class="row profile-actions">
           <button class="btn primary" data-resume-coach ${ready && signedIn && !pending ? "" : "disabled"}>${iconSpark()} ${pending ? "جاري تحسين السيرة…" : "تحسين السيرة الكاملة باستخدام DeepSeek"}</button>
-          <button class="btn ${approved ? "outline" : "primary"}" data-approve-master-resume ${coach ? "" : "disabled"}>${iconCheck()} <span>${approved ? "السيرة معتمدة" : "اعتماد السيرة المحسنة"}</span></button>
+          <button class="btn ${approved ? "outline" : "primary"}" data-approve-master-resume ${complete && !pending ? "" : "disabled"}>${iconCheck()} <span>${approved ? "نسخة DeepSeek معتمدة" : "اعتماد السيرة المحسنة"}</span></button>
           <button class="btn outline" data-search-approved-jobs>${iconBolt()} البحث عن وظائف مناسبة</button>
         </div>
         <form class="form" data-coach-target ${targetJobs().length ? "" : "hidden"}>
@@ -2476,11 +2517,12 @@ function renderResumeCoach() {
 const RESUME_COACH_ERRORS = {
   AUTH_REQUIRED: "سجّل الدخول، ثم جرّب تحسين السيرة مرة أخرى.",
   RESUME_REQUIRED: "الصق نص السيرة الكامل أو ارفع ملفاً واضحاً، ثم حاول مرة أخرى.",
+  RESUME_UNREADABLE: "تعذرت قراءة نص السيرة. أعد استخراج الملف المحفوظ أو الصق نسخة نصية واضحة.",
   RATE_LIMITED: "انتظر دقيقة قبل طلب تحسين جديد.",
   AI_BUSY: "مدرب السيرة مشغول الآن. حاول بعد قليل.",
   AI_TIMEOUT: "استغرق تحسين السيرة وقتاً أطول من المتوقع. حاول مرة أخرى.",
   AI_INVALID_DRAFT: "لم تكتمل مسودتا السيرة. حاول مرة أخرى.",
-  AI_UNAVAILABLE: "تعذر الاتصال بخدمة DeepSeek. حُفظ نص سيرتك. أعد المحاولة لاحقاً.",
+  AI_UNAVAILABLE: "تعذر الاتصال بخدمة DeepSeek. النص متاح للمراجعة. أعد المحاولة لاحقاً.",
   RESUME_CHANGED: "تغيّر نص السيرة أثناء التحسين. حسّن النص الحالي مرة أخرى.",
 };
 
@@ -2623,6 +2665,7 @@ async function generateJobKit(jobId, model = state.aiWriterModel) {
     "جاري تجهيز كاتب الظل...",
     "تم تجهيز السيرة والخطاب والمقابلة",
     async () => {
+      await loadSelectedPosting(job);
       const result = await apiJson("/api/ghostwriter", {
         method: "POST",
         body: JSON.stringify({
@@ -2699,6 +2742,10 @@ function setupEvents() {
       searchPage.key = "";
       navigate(searchUrl(form.dataset.vacancyFilters, filters));
     });
+  });
+  document.querySelector("[data-edit-match-role]")?.addEventListener("click", () => {
+    navigate("/account");
+    document.querySelector('[data-profile-field="target_roles"]')?.focus();
   });
   document.querySelector("[data-retry-job-search]")?.addEventListener("click", () => {
     searchPage.key = "";
@@ -2918,6 +2965,7 @@ function setupEvents() {
     button.addEventListener("click", async () => {
       const job = jobById(button.dataset.evaluateJob);
       if (!job || !masterResumeReady()) return;
+      await loadSelectedPosting(job);
       const result = await runAction("evaluate-job", "جاري التقييم...", "تم تقييم الملاءمة", () =>
         apiJson("/api/jobs/evaluate", { method: "POST", body: JSON.stringify({ job, profile: approvedMatchingProfile() }) }));
       if (result) {
@@ -3177,7 +3225,7 @@ function setupEvents() {
         `جاري تجهيز ملف ${format.toUpperCase()}...`,
         `تم تجهيز ملف ${format.toUpperCase()}`,
         async () => {
-          const file = await fetch("/api/export-package", {
+          const file = await accountFetch("/api/export-package", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ format, job, profile: approvedProfile(), kit, document: documentType }),
@@ -3298,8 +3346,10 @@ function setupEvents() {
   if (resumeCoachButton) {
     resumeCoachButton.addEventListener("click", async () => {
       if (state.resumeCoachPending || !state.session?.authenticated || !readableResumeText(state.profile?.resume_text)) return;
+      applyResumeSignalsFromText(state.profile.resume_text, true);
+      saveLocalProfile(state.profile);
       const profile = state.profile;
-      const accountId = state.session.user?.sub;
+      const owner = accountId();
       state.resumeCoachPending = true;
       const coach = await runAction(
         "resume-coach",
@@ -3310,11 +3360,12 @@ function setupEvents() {
             method: "POST",
             body: JSON.stringify({ profile }),
           });
-          if (profile.resume_text !== state.profile?.resume_text || accountId !== state.session.user?.sub) {
+          if (profile.resume_text !== state.profile?.resume_text || owner !== accountId()) {
             const error = new Error("Resume changed during generation");
             error.code = "RESUME_CHANGED";
             throw error;
           }
+          if (!usableCoachDraft(draft)) throw Object.assign(new Error("Incomplete draft"), { code: "AI_INVALID_DRAFT" });
           return draft;
         },
         (code) => RESUME_COACH_ERRORS[code] || "تعذّر تشغيل مدرب السيرة مؤقتاً. جرّب مرة أخرى.",
@@ -3333,7 +3384,7 @@ function setupEvents() {
   if (approveMasterResume) {
     approveMasterResume.addEventListener("click", () => {
       const coach = state.resumeCoach;
-      if (!coach) return;
+      if (!usableCoachDraft(coach)) return;
       const searchProfile = coach.search_profile || {};
       const targetTitles = Array.isArray(searchProfile.target_titles) ? searchProfile.target_titles.join(", ") : "";
       const keywords = Array.isArray(searchProfile.keywords) ? searchProfile.keywords.join(", ") : "";
@@ -3346,6 +3397,7 @@ function setupEvents() {
         resume_seniority: state.profile.resume_seniority || searchProfile.seniority,
       };
       state.masterResume = {
+        source: "deepseek",
         ar: coach.ar_master_resume || "",
         en: coach.en_master_resume || "",
         approved_at: new Date().toISOString(),
@@ -3366,6 +3418,13 @@ function setupEvents() {
       const field = language === "ar" ? "ar_master_resume" : "en_master_resume";
       state.resumeCoach = { ...state.resumeCoach, [field]: e.target.value };
       state.approvedMasterResume = false;
+      const badge = document.querySelector("[data-coach-approval]");
+      if (badge) badge.textContent = "مسودة DeepSeek تحتاج مراجعة";
+      const approve = document.querySelector("[data-approve-master-resume]");
+      if (approve) {
+        approve.disabled = !usableCoachDraft();
+        approve.querySelector("span").textContent = "اعتماد السيرة المحسنة";
+      }
       document.querySelectorAll("[data-export-master]").forEach((button) => { button.disabled = true; });
       saveLocalAiWriterState();
     });
@@ -3378,10 +3437,17 @@ function setupEvents() {
   const logout = document.querySelector("[data-auth-logout]");
   if (logout) {
     logout.addEventListener("click", async () => {
-      await fetch("/api/auth/logout", { method: "POST" }).catch(() => null);
-      state.session = { authenticated: false, user: null, google_configured: state.session?.google_configured || false };
-      state.action = { pending: "", message: "Signed out.", error: "" };
-      render();
+      const response = await fetch("/api/auth/logout", { method: "POST" }).catch(() => null);
+      if (!response?.ok) {
+        state.action = { pending: "", message: "", error: "تعذر تسجيل الخروج. أعد المحاولة." };
+        render();
+        return;
+      }
+      workspaceOwner = "";
+      clearTimeout(saveWorkspaceTimer);
+      state.session = { authenticated: false, user: null };
+      root.replaceChildren();
+      location.replace("/account");
     });
   }
 
@@ -3446,10 +3512,24 @@ function setupEvents() {
     item.addEventListener(eventName, (e) => {
       const key = e.target.dataset.profileField;
       if (state.profile?.[key] === e.target.value) return;
+      const recovering = key === "resume_text" && e.target.hasAttribute("data-damaged-source");
       state.profile = { ...(state.profile || {}), [key]: e.target.value };
+      if (!["resume_text", "resume_filename"].includes(key)) {
+        state.profile.resume_edited_fields = [...new Set([...(state.profile.resume_edited_fields || []), key])];
+      }
       if (key === "resume_text") {
+        if (recovering) {
+          e.target.removeAttribute("data-damaged-source");
+          for (const field of RESUME_DERIVED_FIELDS) {
+            if (!state.profile.resume_edited_fields?.includes(field)) state.profile[field] = "";
+          }
+        }
         resetResumeCoach();
         const ready = readableResumeText(e.target.value);
+        const damaged = !ready && Boolean(e.target.value.trim());
+        const hint = document.querySelector("[data-source-recovery]");
+        if (hint) { hint.hidden = !damaged; hint.textContent = resumeRecoveryMessage(); }
+        document.querySelectorAll("[data-profile-autofill], [data-approve-uploaded-resume]").forEach(button => { button.disabled = !ready || state.resumeImportPending; });
         const coach = document.querySelector(".resume-coach");
         if (coach) {
           coach.classList.remove("approved");
@@ -3457,7 +3537,9 @@ function setupEvents() {
           coach.querySelector("[data-coach-input-step]").classList.toggle("done", ready);
           coach.querySelector("[data-coach-input-hint]").hidden = ready;
           const badge = coach.querySelector("[data-coach-approval]");
-          badge.textContent = "تحتاج اعتماد";
+          badge.textContent = damaged ? "النص يحتاج إلى إعادة استخراج" : "لم تُنشأ نسخة محسّنة";
+          coach.querySelector("[data-coach-input-hint]").textContent = damaged ? resumeRecoveryMessage() : "ارفع السيرة الأصلية أو الصق نصها أولاً.";
+          coach.querySelector("[data-matching-ready]").classList.toggle("done", ready && state.session?.authenticated);
           badge.classList.add("muted");
           coach.querySelectorAll("[data-coach-draft]").forEach((item) => item.remove());
           const approve = coach.querySelector("[data-approve-master-resume]");
@@ -3468,6 +3550,7 @@ function setupEvents() {
           if (targetButton) targetButton.disabled = !ready || !state.session?.authenticated || state.jobWriterPending;
           coach.querySelector("[data-resume-coach]").disabled = !ready || !state.session?.authenticated || state.resumeCoachPending;
         }
+        saveLocalProfile(state.profile);
         saveLocalAiWriterState();
       }
     });
@@ -3484,7 +3567,7 @@ function setupEvents() {
   if (deleteResumeFile) {
     deleteResumeFile.addEventListener("click", async () => {
       if (!confirm("حذف ملف السيرة الأصلي المشفّر؟ سيبقى النص المستخرج حتى تحذفه من الحقل وتحفظ الملف الشخصي.")) return;
-      const response = await fetch(`/api/resumes/${encodeURIComponent(deleteResumeFile.dataset.deleteResumeFile)}`, { method: "DELETE" });
+      const response = await accountFetch(`/api/resumes/${encodeURIComponent(deleteResumeFile.dataset.deleteResumeFile)}`, { method: "DELETE" });
       if (response.ok) {
         state.resumeFile = null;
         state.profile = { ...(state.profile || {}), resume_filename: "" };
@@ -3528,28 +3611,20 @@ function setupEvents() {
   const saveProfile = document.querySelector("[data-save-profile]");
   if (saveProfile) {
     saveProfile.addEventListener("click", async () => {
-      saveLocalProfile(state.profile);
-      let savedOnline = false;
-      try {
-        const response = await fetch("/api/profile", {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(state.profile),
-        });
-        savedOnline = response.ok;
-        if (savedOnline) {
-          const serverProfile = await response.json();
-          state.profile = { ...(state.profile || {}), ...serverProfile, resume_text: state.profile?.resume_text || "" };
-          saveLocalProfile(state.profile);
+      if (state.session?.authenticated) {
+        if (!workspaceOwner) {
+          state.action = { pending: "", message: "", error: "تعذر تحميل بيانات الحساب. حدّث الصفحة قبل الحفظ." };
+          render();
+          return;
         }
-      } catch {
-        savedOnline = false;
+        clearTimeout(saveWorkspaceTimer);
+        await flushWorkspaceState();
+        if (state.persistence.storage === "save-failed" || state.persistence.storage === "conflict") return;
+        state.action = { pending: "", message: state.persistence.pending || workspaceSaving ? "جاري حفظ الملف في حسابك." : "تم حفظ الملف في حسابك.", error: "" };
+      } else {
+        saveLocalProfile(state.profile);
+        state.action = { pending: "", message: "ملف الضيف متاح في هذه الجلسة.", error: "" };
       }
-      state.action = {
-        pending: "",
-        message: savedOnline ? "تم حفظ السيرة والملف" : "تم حفظ السيرة محلياً على هذا الجهاز",
-        error: "",
-      };
       render();
     });
   }
@@ -3563,7 +3638,7 @@ function setupEvents() {
         return;
       }
       applyResumeSignalsFromText(state.profile?.resume_text || "", true);
-      state.masterResume = { ar: "", en: "", approved_at: new Date().toISOString() };
+      state.masterResume = { source: "original", ar: "", en: "", approved_at: new Date().toISOString() };
       Object.keys(state.ghostwriter).forEach((jobId) => invalidateApplicationReview(jobId));
       state.approvedMasterResume = true;
       state.action = { pending: "", message: "تم اعتماد السيرة الأصلية.", error: "" };
@@ -3733,33 +3808,38 @@ async function init() {
   } catch (error) {
     state.action = { pending: "", message: "", error: "Live workspace data is temporarily unavailable. Retry when connected." };
   }
-  const localProfile = loadLocalProfile();
-  if (localProfile) {
-    state.profile = { ...(state.profile || {}), ...localProfile };
-  }
-  const guestWorkspace = loadGuestWorkspace();
-  if (guestWorkspace) {
-    state.jobs = Array.isArray(guestWorkspace.jobs) ? guestWorkspace.jobs : state.jobs;
-    state.packages = Array.isArray(guestWorkspace.packages) ? guestWorkspace.packages : state.packages;
-    state.drafts = Array.isArray(guestWorkspace.drafts) ? guestWorkspace.drafts : state.drafts;
-    state.sources = Array.isArray(guestWorkspace.sources) ? guestWorkspace.sources : state.sources;
-  }
-  const localAiWriter = loadLocalAiWriterState();
-  if (localAiWriter) {
-    state.aiWriterModel = localAiWriter.aiWriterModel || state.aiWriterModel;
-    state.ghostwriter = localAiWriter.ghostwriter || state.ghostwriter;
-    state.approvedKits = localAiWriter.approvedKits || state.approvedKits;
-    state.interviewChats = localAiWriter.interviewChats || state.interviewChats;
-    state.resumeCoach = localAiWriter.resumeCoach || state.resumeCoach;
-    state.approvedMasterResume = Boolean(localAiWriter.approvedMasterResume);
-    state.masterResume = localAiWriter.masterResume || state.masterResume;
-    state.tailoringBriefs = localAiWriter.tailoringBriefs || state.tailoringBriefs;
-  }
   try {
     const sessionResponse = await fetch("/api/auth/session");
-    if (sessionResponse.ok) state.session = await sessionResponse.json();
+    if (sessionResponse.ok) {
+      state.session = await sessionResponse.json();
+      guestSessionVerified = state.session.authenticated === false;
+    }
   } catch {
     state.session = { authenticated: false, user: null, google_configured: false };
+  }
+  if (guestSessionVerified) {
+    const localProfile = loadLocalProfile();
+    if (localProfile) {
+      state.profile = { ...(state.profile || {}), ...localProfile };
+    }
+    const guestWorkspace = loadGuestWorkspace();
+    if (guestWorkspace) {
+      state.jobs = Array.isArray(guestWorkspace.jobs) ? guestWorkspace.jobs : state.jobs;
+      state.packages = Array.isArray(guestWorkspace.packages) ? guestWorkspace.packages : state.packages;
+      state.drafts = Array.isArray(guestWorkspace.drafts) ? guestWorkspace.drafts : state.drafts;
+      state.sources = Array.isArray(guestWorkspace.sources) ? guestWorkspace.sources : state.sources;
+    }
+    const localAiWriter = loadLocalAiWriterState();
+    if (localAiWriter) {
+      state.aiWriterModel = localAiWriter.aiWriterModel || state.aiWriterModel;
+      state.ghostwriter = localAiWriter.ghostwriter || state.ghostwriter;
+      state.approvedKits = localAiWriter.approvedKits || state.approvedKits;
+      state.interviewChats = localAiWriter.interviewChats || state.interviewChats;
+      state.resumeCoach = localAiWriter.resumeCoach || state.resumeCoach;
+      state.approvedMasterResume = Boolean(localAiWriter.approvedMasterResume);
+      state.masterResume = localAiWriter.masterResume || state.masterResume;
+      state.tailoringBriefs = localAiWriter.tailoringBriefs || state.tailoringBriefs;
+    }
   }
   await loadWorkspaceState();
   await loadResumeFile();

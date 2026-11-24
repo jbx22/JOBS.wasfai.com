@@ -1,10 +1,11 @@
-const CACHE_NAME = "jobs-wasfai-v76";
+const CACHE_NAME = "jobs-wasfai-v77";
 const APP_SHELL = [
   "/",
   "/app",
   "/styles.css",
   "/app.js",
   "/resume-signals.js",
+  "/resume-text-quality.js",
   "/resume-extraction.js",
   "/resume-docx.mjs",
   "/admin/",
@@ -51,7 +52,7 @@ self.addEventListener("fetch", (event) => {
   }
   // HTML and application code are network-first so deployments update quickly,
   // with a versioned cached fallback for resilient read-only offline access.
-  if (url.origin === self.location.origin && (event.request.mode === "navigate" || /^\/(?:app\.js|pricing\.js|resume-extraction\.js|resume-signals\.js|resume-docx\.mjs)$/.test(url.pathname))) {
+  if (url.origin === self.location.origin && (event.request.mode === "navigate" || /^\/(?:app\.js|pricing\.js|resume-extraction\.js|resume-signals\.js|resume-text-quality\.js|resume-docx\.mjs)$/.test(url.pathname))) {
     event.respondWith(fetch(event.request, { cache: "no-store" }).then((response) => {
       if (response.ok && !/no-store|private/i.test(response.headers.get("Cache-Control") || "")) {
         const copy = response.clone();

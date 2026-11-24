@@ -245,9 +245,9 @@ async function fetchSourcePayload(env, source) {
   return html;
 }
 
-async function fetchPublicPayload(url, contentType, { official = false, missingOk = false } = {}) {
+export async function fetchPublicPayload(url, contentType, { official = false, missingOk = false, timeoutMs = 12_000 } = {}) {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 12_000);
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const options = { signal: controller.signal, headers: {
       "User-Agent": "JOBS.wasfai.com ingestion bot; contact=admin@wasfai.com",
@@ -507,8 +507,14 @@ const ROLE_ALIASES = [
   ["plant manager", "factory manager", "مدير مصنع", "مدير المصنع"],
   ["project controls engineer", "مهندس ضبط المشاريع", "مهندس مراقبة المشاريع"],
   ["financial analyst", "محلل مالي", "محللة مالية"], ["registered nurse", "ممرض مسجل", "ممرضة مسجلة"],
-  ["procurement specialist", "أخصائي مشتريات", "أخصائية مشتريات"], ["human resources specialist", "أخصائي موارد بشرية"],
+  ["procurement specialist", "أخصائي مشتريات", "أخصائية مشتريات"], ["human resources specialist", "HR specialist", "أخصائي موارد بشرية", "أخصائية موارد بشرية"],
   ["operations manager", "مدير عمليات", "مدير العمليات"],
+  ["administrative assistant", "admin assistant", "مساعد إداري", "مساعدة إدارية"],
+  ["receptionist", "front desk receptionist", "موظف استقبال", "موظفة استقبال"],
+  ["front desk agent", "front office agent", "موظف استقبال فندقي", "موظفة استقبال فندقي"],
+  ["customer service representative", "customer service agent", "customer support representative", "ممثل خدمة العملاء", "ممثلة خدمة العملاء", "موظف خدمة عملاء", "موظفة خدمة عملاء", "خدمة العملاء"],
+  ["sales associate", "retail sales associate", "بائع تجزئة", "بائعة تجزئة"],
+  ["data entry clerk", "مدخل بيانات", "مدخلة بيانات"],
   ["data analyst", "محلل بيانات"], ["software engineer", "software developer", "مهندس برمجيات", "مطور برمجيات"],
 ];
 
@@ -518,6 +524,8 @@ const SKILL_ALIASES = [
   ["project controls", "ضبط المشاريع", "مراقبة المشاريع"], ["cost control", "ضبط التكاليف", "مراقبة التكاليف"],
   ["risk management", "إدارة المخاطر"], ["project management", "إدارة المشاريع"],
   ["quality control", "مراقبة الجودة", "ضبط الجودة"], ["budgeting", "إعداد الميزانية"],
+  ["customer service", "خدمة العملاء", "خدمة الزبائن"], ["data entry", "إدخال البيانات"],
+  ["complaint resolution", "معالجة الشكاوى", "حل الشكاوى"], ["bookkeeping", "مسك الدفاتر"],
 ];
 
 function aliasLookup(groups) {
@@ -890,7 +898,7 @@ function stripHtml(value) {
   return clean(String(value || "").replace(/<script[\s\S]*?<\/script>/gi, " ").replace(/<style[\s\S]*?<\/style>/gi, " ").replace(/<[^>]+>/g, " "));
 }
 
-function jobDescription(value) {
+export function jobDescription(value) {
   const text = String(value || "")
     .replace(/<script\b[\s\S]*?<\/script>/gi, " ")
     .replace(/<style\b[\s\S]*?<\/style>/gi, " ")

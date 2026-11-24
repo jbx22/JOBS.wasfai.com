@@ -101,19 +101,20 @@ test("signed-in applicant uploads, tailors, retries the coach and recovers a sav
   await expect(page.getByRole("status")).toContainText(/لا توجد شواغر موثقة|No verified vacancies/);
   await expect.poll(() => trace.stored.approvedMasterResume).toBe(true);
   expect(trace.stored.masterResume.en).toBe("");
+  expect(trace.stored.masterResume.source).toBe("original");
   expect(trace.stored.masterResume.ar).toBe("");
   await page.goto("/account");
   const approval = page.locator("[data-coach-approval]");
-  await expect(approval).toHaveText("السيرة معتمدة");
+  await expect(approval).toHaveText("السيرة الأصلية معتمدة للمطابقة");
   await upload.setInputFiles({ name: "damaged.docx", mimeType: docxType, buffer: Buffer.from("invalid Word archive") });
   await expect(page.locator(".banner.err")).toContainText("Word");
   await expect(original).toHaveValue(source);
-  await expect(approval).toHaveText("السيرة معتمدة");
+  await expect(approval).toHaveText("السيرة الأصلية معتمدة للمطابقة");
   expect(trace.uploads).toBe(1);
   await page.locator("[data-reextract-resume]").click();
   await expect(page.locator(".banner.ok")).toContainText("تم استخراج نص السيرة");
   await expect(original).toHaveValue(source);
-  await expect(approval).toHaveText("السيرة معتمدة");
+  await expect(approval).toHaveText("السيرة الأصلية معتمدة للمطابقة");
   expect(trace.downloads).toBe(1);
   expect(trace.uploads).toBe(1);
 
@@ -129,6 +130,7 @@ test("signed-in applicant uploads, tailors, retries the coach and recovers a sav
   for (const body of trace.coach) expect(body.profile.resume_text).toBe(source);
   await page.locator("[data-approve-master-resume]").click();
   await expect.poll(() => trace.stored.masterResume?.en).toBe(master.en_master_resume);
+  await expect(page.locator("[data-coach-approval]")).toHaveText("نسخة DeepSeek معتمدة");
   expect(trace.stored.approvedMasterResume).toBe(true);
   expect(trace.errors).toEqual([]);
   expect(trace.unexpected).toEqual([]);
@@ -145,4 +147,62 @@ test("guest can extract the original locally and both AI actions require a signe
   expect(trace.coach).toHaveLength(0);
   expect(trace.tailoring).toHaveLength(0);
   expect(trace.errors).toEqual([]);
+});
+
+test("a signed-in account opens only its own profile and recovers damaged legacy text without granting AI approval", async ({ page }) => {
+  const { trace } = await mockWorkspace(page, true);
+  const corrupted = "cid:351 � � @   ".repeat(42) + "inbox@example.invalid";
+  const prior = "Previous unrelated account résumé";
+  await page.addInitScript(({ prior }) => {
+    localStorage.setItem("jobs.wasfai.profile", JSON.stringify({ display_name: prior, resume_text: prior }));
+    localStorage.setItem("jobs.wasfai.aiWriter", JSON.stringify({ resumeCoach: { provider: "deepseek", ar_master_resume: prior, en_master_resume: prior } }));
+    sessionStorage.setItem("jobs.guest.v2.profile", JSON.stringify({ display_name: prior, resume_text: prior }));
+  }, { prior });
+  trace.stored = {
+    profile: { display_name: "Synthetic Applicant", resume_text: corrupted, resume_languages: "inbox@example.invalid" },
+    approvedMasterResume: true, masterResume: { ar: "", en: "" },
+  };
+  await page.route("**/api/resumes", route => route.fulfill({ json: { file: {
+    id: "synthetic-file", name: "test.docx", content_type: docxType, download_url: "/api/resumes/synthetic-file",
+  } } }));
+  await page.goto("/account");
+  await expect(page.locator("[data-source-recovery]")).toBeVisible();
+  await expect(page.locator("[data-profile-field=resume_languages]")).toHaveValue("");
+  await expect(page.locator("[data-original-resume]")).toHaveValue(corrupted);
+  await expect(page.locator("[data-coach-approval]")).toContainText("إعادة استخراج");
+  await expect(page.locator("[data-resume-coach]")).toBeDisabled();
+  await expect(page.locator("[data-approve-uploaded-resume]")).toBeDisabled();
+  await expect(page.locator("[data-coach-draft]")).toHaveCount(0);
+  await expect(page.locator("body")).not.toContainText(prior);
+
+  await page.locator("[data-reextract-resume]").click();
+  await expect(page.locator("[data-original-resume]")).toHaveValue(source);
+  await expect(page.locator("[data-source-recovery]")).toBeHidden();
+  await expect(page.locator("[data-coach-approval]")).toHaveText("لم تُنشأ نسخة محسّنة");
+  await expect(page.locator("[data-resume-coach]")).toBeEnabled();
+  await expect.poll(() => trace.stored.approvedMasterResume).toBe(false);
+  expect(trace.coach).toHaveLength(0);
+  expect(trace.uploads).toBe(0);
+  const privateCache = await page.evaluate(() => [localStorage.getItem("jobs.wasfai.profile"), sessionStorage.getItem("jobs.guest.v2.profile")]);
+  expect(privateCache.every(value => !value.includes("instrument calibration"))).toBe(true);
+});
+
+test("unavailable account storage never falls back to another account or saves an empty workspace", async ({ page }) => {
+  await mockWorkspace(page, true);
+  let writes = 0;
+  await page.route("**/api/me/state", route => {
+    if (route.request().method() === "PUT") writes++;
+    return route.fulfill({ status: 503, json: { error: "Workspace unavailable" } });
+  });
+  await page.addInitScript(() => {
+    const profile = JSON.stringify({ display_name: "Unrelated User", resume_text: "Private source from another session" });
+    localStorage.setItem("jobs.wasfai.profile", profile);
+    sessionStorage.setItem("jobs.guest.v2.profile", profile);
+  });
+  await page.goto("/account");
+  await expect(page.locator("[data-original-resume]")).toHaveValue("");
+  await expect(page.locator(".banner.err")).toContainText("تحميل بيانات");
+  await page.locator("[data-save-profile]").click();
+  await expect(page.locator(".banner.err")).toContainText("قبل الحفظ");
+  expect(writes).toBe(0);
 });

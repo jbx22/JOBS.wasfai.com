@@ -1,6 +1,8 @@
 import { cityAliases, matchJob, normalizeProfile, roleSearchAliases } from "../../workers/ingestion/src/index.js";
+import { inferResumeSignals, readableResumeText } from "../../public/resume-signals.js";
 import { GOVERNMENT_BOARDS } from "../../workers/ingestion/src/boards.js";
 import { getJobDb } from "./_db.js";
+import { selectedPostingDescription } from "./_smartrecruiters_detail.js";
 import { ensureRecruitmentSchema, invalid } from "./_recruitment.js";
 
 export const PUBLIC_JOB_UNION = `
@@ -150,7 +152,9 @@ export async function countPublicJobs(env) {
 export async function getPublicJob(env, publicId) {
   if (typeof publicId !== "string" || !/^[ei]-.{1,180}$/.test(publicId)) return null;
   const jobs = await listPublicJobs(env, { id: publicId.slice(2), kind: publicId.startsWith("e-") ? "employer" : "ingested" }, 1);
-  return jobs[0] || null;
+  const job = jobs[0];
+  if (!job) return null;
+  return { ...job, description: await selectedPostingDescription(job) };
 }
 
 function paging(inputLimit, inputOffset, inputDate) {
@@ -234,7 +238,20 @@ export function jobPosting(job) {
 }
 
 export async function matchPublicJobs(env, inputProfile, inputLimit, options = {}) {
-  const profile = normalizeProfile(inputProfile || {});
+  const input = inputProfile || {};
+  const source = String(input.resume_text || input.master_resume_en || input.master_resume_ar || "").trim();
+  if (source && !readableResumeText(source)) {
+    throw invalid("Re-read your uploaded file or paste readable résumé text to find matches.", 422, "RESUME_UNREADABLE");
+  }
+  const inferred = source && (!input.target_roles?.trim?.() || !input.resume_skills?.trim?.()) ? inferResumeSignals(source) : {};
+  const profile = normalizeProfile({
+    ...input,
+    target_roles: String(input.target_roles || "").trim() || inferred.target_roles,
+    resume_skills: String(input.resume_skills || "").trim() || inferred.resume_skills,
+  });
+  if (!profile.roles.length) {
+    throw invalid("Enter a target job title so we can search for relevant vacancies.", 422, "TARGET_ROLE_REQUIRED");
+  }
   const page = paging(inputLimit, options.offset, options.as_of);
   const db = await publicDb(env);
   const query = publicQuery(options.filters, page.as_of);
@@ -273,5 +290,5 @@ export async function matchPublicJobs(env, inputProfile, inputLimit, options = {
     }));
     jobs = selected.map(row => byId.get((row.kind === "employer" ? "e-" : "i-") + row.id)).filter(job => job?.match_eligible);
   }
-  return { ...searchPage(jobs, ranked.length, page), matched: ranked.length, profile_terms: profile.terms.slice(0, 30), source: "verified-public-jobs", scoring_method: "evidence-weighted" };
+  return { ...searchPage(jobs, ranked.length, page), matched: ranked.length, profile_terms: [...profile.roles, ...profile.skills].slice(0, 30), source: "verified-public-jobs", scoring_method: "evidence-weighted" };
 }

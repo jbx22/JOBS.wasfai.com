@@ -1,7 +1,7 @@
 {
-  "current": 76,
-  "lastDescription": "Add bilingual vacancy browsing and rank résumé matches using occupational evidence",
-  "lastAt": "2026-11-23 19:22",
+  "current": 77,
+  "lastDescription": "Recover unreadable résumé uploads, strengthen DeepSeek coaching and guide applicants to relevant vacancies",
+  "lastAt": "2026-11-24 13:35",
   "history": [
     {
       "n": 1,
@@ -372,6 +372,11 @@
       "n": 76,
       "description": "Add bilingual vacancy browsing and rank résumé matches using occupational evidence",
       "at": "2026-11-23 19:22"
+    },
+    {
+      "n": 77,
+      "description": "Recover unreadable résumé uploads, strengthen DeepSeek coaching and guide applicants to relevant vacancies",
+      "at": "2026-11-24 13:35"
     }
   ]
 }

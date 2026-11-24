@@ -48,7 +48,7 @@ Convention: `jobs{N}` is a sequential integer. `jobs1` = initial prototype, `job
 - [Career-Ops](https://github.com/career-ops-hq/career-ops) informs job-link import, multi-source search, evidence-based fit grades, and the approval-based application package.
 - [AI Job Search](https://github.com/ai-job-search-dev/ai-job-search) informs the approved CV workflow, screening-answer drafts, tailored CVs and cover letters, and mock interviews.
 
-The Jobs workspace implements these workflows in its own UI. Recruiter messages can be pasted to prepare a reply. Gmail and IMAP inbox synchronization require a separate integration. Users review drafts and submit their applications themselves.
+The Jobs workspace implements these workflows in its own UI. Its [MIT-licensed Career-Ops SmartRecruiters adapter](workers/ingestion/LICENSE.career-ops) scans registered Saudi employer boards. The published site includes the upstream notice at `/licenses/career-ops.txt`. Opening an indexed SmartRecruiters vacancy also retrieves a short excerpt of the official duties and qualifications through the public Posting API. Jobs caches each selected posting independently. JobOps and AI Job Search are workflow references. Recruiter messages can be pasted to prepare a reply. Gmail and IMAP inbox synchronization require a separate integration. Users review drafts and submit their applications themselves.
 
 ## AI Writer / AI كاتب
 

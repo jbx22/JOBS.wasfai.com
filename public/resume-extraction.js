@@ -1,3 +1,5 @@
+import { assessResumeText, resumeContacts } from "./resume-text-quality.js";
+
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
 const MAX_XML_BYTES = 12 * 1024 * 1024;
 const MAX_PDF_PAGES = 100;
@@ -16,6 +18,7 @@ const messages = {
   PDF_PAGE_LIMIT: 'يقبل قارئ PDF حتى 100 صفحة. ارفع صفحات السيرة فقط.',
   OCR_PAGE_LIMIT: 'يقبل التعرف الضوئي حتى 8 صفحات مصوّرة. اختر الصفحات المطلوبة أو الصق النص.',
   OCR_TIMEOUT: 'استغرقت قراءة الصفحة المصوّرة وقتاً طويلاً. جرّب ملفاً أقل دقة أو الصق النص.',
+  RESUME_TEXT_DAMAGED: 'بعض النص المستخرج غير مقروء. ارفع نسخة أوضح أو الصق النص الصحيح قبل المتابعة.',
   OCR_UNREADABLE: 'تعذرت قراءة الصفحات المصوّرة. جرّب صورة أوضح داخل PDF أو الصق النص.',
 };
 
@@ -130,12 +133,36 @@ function pdfPageText(items) {
   }).join('\n');
 }
 
-async function needsOcr(page, text, ops) {
-  if (/\(cid:\d+\)|�{2,}/i.test(text)) return true;
-  if ((text.match(/\p{L}/gu) || []).length >= 80) return false;
+async function needsOcr(page, text, items, ops) {
+  const quality = assessResumeText(text);
+  if (quality.damaged) return true;
+  const height = Math.abs(page.view[3] - page.view[1]);
+  let minY = Infinity, maxY = -Infinity;
+  for (const item of items) {
+    if (!item.str?.trim()) continue;
+    minY = Math.min(minY, item.transform[5]);
+    maxY = Math.max(maxY, item.transform[5]);
+  }
+  // A résumé may have a short, genuine header or footer above a full-page scanned body.
+  if (quality.readable && quality.usefulWords >= 28 && maxY - minY > height * 0.45) return false;
   const marks = await page.getOperatorList();
-  const images = [ops.paintImageXObject, ops.paintInlineImageXObject, ops.paintImageXObjectRepeat, ops.paintImageMaskXObject];
-  return marks.fnArray.some(op => images.includes(op) || (!text && op === ops.constructPath));
+  const area = Math.abs((page.view[2] - page.view[0]) * height);
+  let scaleArea = 1;
+  const stack = [];
+  const imageOps = new Set([ops.paintImageXObject, ops.paintInlineImageXObject, ops.paintImageXObjectRepeat, ops.paintImageMaskXObject]);
+  for (let i = 0; i < marks.fnArray.length; i++) {
+    const op = marks.fnArray[i];
+    if (op === ops.save || op === ops.paintFormXObjectBegin) stack.push(scaleArea);
+    if (op === ops.restore || op === ops.paintFormXObjectEnd) scaleArea = stack.pop() ?? 1;
+    const transform = op === ops.transform ? marks.argsArray[i] : op === ops.paintFormXObjectBegin ? marks.argsArray[i]?.[0] : null;
+    if (transform) {
+      const [a, b, c, d] = transform;
+      scaleArea *= Math.abs(a * d - b * c);
+    }
+    if (imageOps.has(op) && (scaleArea >= area * 0.20 || !quality.usefulWords)) return true;
+    if (!text && op === ops.constructPath) return true;
+  }
+  return false;
 }
 
 async function startOcr(onProgress) {
@@ -162,24 +189,92 @@ async function startOcr(onProgress) {
   });
 }
 
-async function recognizePage(page, worker) {
+function lineKey(value) {
+  return value.normalize('NFKC').replace(/[\u061c\u200e\u200f\u0640]/gu, '').replace(/\s+/g, ' ').trim().toLowerCase();
+}
+
+function hasVisibleInk(canvas) {
+  // Downsampling avoids allocating a second full-resolution image on mobile.
+  const preview = document.createElement('canvas');
+  preview.width = preview.height = 96;
+  const ctx = preview.getContext('2d', { willReadFrequently: true });
+  ctx.drawImage(canvas, 0, 0, 96, 96);
+  const pixels = ctx.getImageData(0, 0, 96, 96).data;
+  return pixels.some((value, index) => index % 4 !== 3 && value < 243);
+}
+
+async function recognizeRegion(page, worker, from, through, maxPixels) {
   const size = page.getViewport({ scale: 1 });
-  const scale = Math.min(2, Math.sqrt(4_000_000 / (size.width * size.height)), 4096 / Math.max(size.width, size.height));
+  const fraction = through - from;
+  const targetScale = fraction === 1 ? 2 : 3;
+  const scale = Math.min(targetScale, Math.sqrt(maxPixels / (size.width * size.height * fraction)),
+    3072 / size.width, 3072 / (size.height * fraction));
   const viewport = page.getViewport({ scale });
+  const top = Math.floor(viewport.height * from);
   const canvas = document.createElement('canvas');
-  canvas.width = Math.max(1, Math.ceil(viewport.width));
-  canvas.height = Math.max(1, Math.ceil(viewport.height));
+  let timer;
   try {
-    await page.render({ canvasContext: canvas.getContext('2d', { willReadFrequently: true }), viewport }).promise;
-    let timer;
-    try {
-      const timeout = new Promise((_, reject) => {
-        timer = setTimeout(() => reject(failure('OCR_TIMEOUT')), 120_000);
-      });
-      const result = await Promise.race([worker.recognize(canvas), timeout]);
-      return result.data.text.trim();
-    } finally { clearTimeout(timer); }
-  } finally { canvas.width = canvas.height = 1; }
+    canvas.width = Math.max(1, Math.ceil(viewport.width));
+    canvas.height = Math.max(1, Math.ceil(viewport.height * through) - top);
+    const context = canvas.getContext('2d', { willReadFrequently: true });
+    if (!context) throw failure('OCR_UNREADABLE');
+    await page.render({ canvasContext: context, viewport, transform: [1, 0, 0, 1, 0, -top], background: '#ffffff' }).promise;
+    if (!hasVisibleInk(canvas)) return { text: '', blank: true, confidence: 0 };
+    const timeout = new Promise((_, reject) => {
+      timer = setTimeout(() => reject(failure('OCR_TIMEOUT')), 90_000);
+    });
+    // Skip expensive hOCR, TSV and word boxes. Mean confidence is available independently.
+    const { data } = await Promise.race([worker.recognize(canvas, {}, { text: true, blocks: false, hocr: false, tsv: false }), timeout]);
+    return { text: data.text.trim(), blank: false, confidence: Number(data.confidence) || 0 };
+  } finally {
+    clearTimeout(timer);
+    canvas.width = canvas.height = 1;
+  }
+}
+
+function usableOcr(result) {
+  const q = assessResumeText(result.text);
+  return result.confidence >= 38 && q.usefulWords > 0 && !q.damaged && q.score >= 45;
+}
+
+async function recoverPage(page, worker, native) {
+  const mobile = globalThis.matchMedia?.('(pointer: coarse)').matches || navigator.deviceMemory <= 4;
+  const maxPixels = mobile ? 1_500_000 : 3_000_000;
+  let first;
+  try { first = await recognizeRegion(page, worker, 0, 1, maxPixels); } catch (error) {
+    if (error?.code === 'OCR_TIMEOUT') throw error;
+    // A failed full-page canvas can still fit as sequential cropped bands.
+  }
+  if (first?.blank && !native.trim()) return '';
+  const nativeQuality = assessResumeText(native);
+  const firstQuality = assessResumeText(first?.text);
+  let recognized = first && usableOcr(first) && (!nativeQuality.damaged || firstQuality.usefulWords >= 4) ? first.text : '';
+
+  if (!recognized) {
+    const lines = new Map();
+    for (const [from, through] of [[0, 0.54], [0.46, 1]]) {
+      const band = await recognizeRegion(page, worker, from, through, maxPixels);
+      if (usableOcr(band)) {
+        for (const line of band.text.split('\n')) if (line.trim()) lines.set(lineKey(line), line.trim());
+      }
+    }
+    recognized = [...lines.values()].join('\n');
+  }
+  if (!recognized) {
+    if (nativeQuality.readable && !nativeQuality.damaged) return native;
+    throw failure('RESUME_TEXT_DAMAGED');
+  }
+  const seen = lineKey(recognized);
+  // Never put the broken hidden layer back ahead of the recovered text. Keep genuine contact
+  // details and missed readable native lines if the native layer itself was trustworthy.
+  const preserved = new Set(resumeContacts(native));
+  if (!nativeQuality.damaged) {
+    for (const line of native.split('\n')) {
+      const q = assessResumeText(line);
+      if (q.usefulWords >= 2 && !q.damaged && !/[�\uE000-\uF8FF]|cid:\d+/iu.test(line)) preserved.add(line.trim());
+    }
+  }
+  return [...preserved].filter(line => !seen.includes(lineKey(line))).concat(recognized).join('\n');
 }
 
 async function extractPdf(file, onProgress) {
@@ -195,25 +290,22 @@ async function extractPdf(file, onProgress) {
     for (let number = 1; number <= pdf.numPages; number++) {
       const page = await pdf.getPage(number);
       try {
-        const content = await page.getTextContent();
-        let text = pdfPageText(content.items);
-        if (await needsOcr(page, text, pdfjs.OPS)) {
+        // Some fonts break PDF.js text extraction even though the page itself can render.
+        const content = await page.getTextContent().catch(() => null);
+        let text = content ? pdfPageText(content.items) : '';
+        if (!content || await needsOcr(page, text, content.items, pdfjs.OPS)) {
           if (++ocrCount > MAX_OCR_PAGES) throw failure('OCR_PAGE_LIMIT');
           onProgress(`جاري قراءة الصفحة المصوّرة ${number} من ${pdf.numPages} بالعربية والإنجليزية...`);
           worker ??= await startOcr(onProgress);
-          const recognized = await recognizePage(page, worker);
-          if (recognized) {
-            // Preserve readable native lines that the raster pass missed.
-            const normalized = recognized.replace(/\s+/g, ' ').trim();
-            const missing = text.split('\n').filter(line => line && !/[�]|\(cid:\d+\)/i.test(line) && !normalized.includes(line.replace(/\s+/g, ' ').trim()));
-            text = [...missing, recognized].join('\n');
-          }
+          text = await recoverPage(page, worker, text);
         }
         if (text) parts.push(text);
       } finally { page.cleanup(); }
     }
     if (!parts.length && ocrCount) throw failure('OCR_UNREADABLE');
-    return parts.join('\n\n');
+    const text = parts.join('\n\n');
+    if (assessResumeText(text).damaged) throw failure('RESUME_TEXT_DAMAGED');
+    return text;
   } catch (error) {
     if (error?.name === 'PasswordException') throw failure('PDF_PASSWORD');
     throw error;

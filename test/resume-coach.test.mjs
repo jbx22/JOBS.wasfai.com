@@ -64,7 +64,10 @@ test("résumé coach requires a session and original text, and rejects incomplet
   assert.equal(attempts, 0);
   const incomplete = await coach({ env, request: await request() });
   assert.equal(incomplete.status, 503);
-  assert.deepEqual(await incomplete.json(), { error: "AI resume coaching did not return both drafts.", code: "AI_INVALID_DRAFT" });
+  const failure = await incomplete.json();
+  assert.equal(failure.code, "AI_INVALID_DRAFT");
+  assert.equal(failure.source_profile.target_roles, "Warehouse coordinator");
+  assert.equal(failure.en_master_resume, undefined);
   assert.equal(attempts, 2);
 });
 
@@ -151,4 +154,69 @@ test("résumé provider key takes precedence and missing scoped credentials use 
     method: "POST", headers: { Authorization: "Bearer health-fixture" },
   }) });
   assert.equal((await result.json()).ready, true);
+});
+
+test("unreadable OCR with contact details never reaches the provider", async (t) => {
+  let attempts = 0;
+  const { addUser } = gatewayFixture(t, { otherFetch: () => { attempts++; return completion(JSON.stringify(drafts)); } });
+  addUser();
+  const text = "test@example.invalid\n+1 202 555 0190\n" + "عbغHص qXجP c A ش R ل \uFFFD (cid:142) ".repeat(14);
+  const response = await coach({ env, request: await request({ profile: { resume_text: text, target_roles: "Customer service" } }) });
+  assert.equal(response.status, 422);
+  assert.equal((await response.json()).code, "RESUME_UNREADABLE");
+  assert.equal(attempts, 0);
+});
+
+test("a short entry-level résumé yields grounded profile fields and concise bilingual drafts without dates", async (t) => {
+  const original = "Alex Ray\nRetail Trainee\nCity: Doha\nSkills: cash handling, stock counts";
+  const english = "Alex Ray\nRetail Trainee\nDoha | Skills\nCash handling and stock counts.";
+  const arabic = "أليكس راي\nمتدرب في قطاع التجزئة\nالدوحة\nالمهارات: التعامل مع النقد وجرد المخزون.";
+  let attempts = 0;
+  const { addUser } = gatewayFixture(t, { otherFetch: (_url, init) => {
+    attempts++;
+    const prompt = JSON.parse(JSON.parse(init.body).messages[1].content);
+    assert.equal(prompt.profile.display_name, "Alex Ray");
+    assert.equal(prompt.profile.resume_skills, "cash handling, stock counts");
+    assert.equal(prompt.profile.resume_text, original);
+    assert.doesNotMatch(JSON.stringify(prompt), /Stale Name|Wrong Skills/);
+    return completion(JSON.stringify({ ar_master_resume: arabic, en_master_resume: english,
+      search_profile: { target_titles: ["Operations Director"], keywords: ["Machine learning"], locations: ["London"], seniority: "Executive" } }));
+  } });
+  addUser();
+  const result = await coach({ env, request: await request({ profile: { display_name: "Stale Name", resume_skills: "Wrong Skills", resume_text: original } }) });
+  const body = await result.json();
+  assert.equal(result.status, 200);
+  assert.equal(attempts, 1);
+  assert.equal(body.en_master_resume, english);
+  assert.equal(body.source_profile.resume_seniority, "Trainee");
+  assert.deepEqual(body.search_profile, { target_titles: ["Retail Trainee"], locations: ["Doha"], keywords: ["cash handling", "stock counts"], seniority: "Trainee" });
+});
+
+test("Arabic year affixes preserve actual dates and an incidental P.O. box is optional", async (t) => {
+  const original = "موظفة استقبال\nدربت المتطوعين لعام٢٠٢١م واستقبلت الزوار وتابعت حجوزاتهم.\nصندوق البريد: 2017";
+  const en = "Receptionist\nTrained volunteers in 2021, welcomed visitors and followed up on their reservations.";
+  const ar = "موظفة استقبال\nدربت المتطوعين في عام ٢٠٢١، واستقبلت الزوار وتابعت حجوزاتهم.";
+  const { addUser } = gatewayFixture(t, { otherFetch: () => completion(JSON.stringify({ ar_master_resume: ar, en_master_resume: en })) });
+  addUser();
+  const result = await coach({ env, request: await request({ profile: { resume_text: original } }) });
+  assert.equal(result.status, 200);
+});
+
+test("timeout and rate-limited coaching retain only grounded source fields for recovery", async (t) => {
+  const { addUser } = gatewayFixture(t, { otherFetch: () => {
+    if (timeout) throw new DOMException("Simulated upstream timeout", "AbortError");
+    return Response.json({}, { status: 429 });
+  } });
+  addUser();
+  let timeout = false;
+  for (const code of ["AI_BUSY", "AI_TIMEOUT"]) {
+    const response = await coach({ env, request: await request() });
+    assert.equal(response.status, 503);
+    const body = await response.json();
+    assert.equal(body.code, code);
+    assert.equal(body.source_profile.target_roles, "Warehouse coordinator");
+    assert.equal(body.en_master_resume, undefined);
+    assert.equal(body.provider, undefined);
+    timeout = true;
+  }
 });

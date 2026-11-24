@@ -3,7 +3,7 @@
 
 const PAGE_SIZE = 100;
 const MAX_PAGES = 5;
-const APPLY_NOTICE = "المتطلبات والتقديم في الإعلان الرسمي.";
+export const APPLY_NOTICE = "المتطلبات والتقديم في الإعلان الرسمي.";
 
 function parseDate(value) {
   const date = typeof value === "string" ? Date.parse(value) : NaN;
