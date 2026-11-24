@@ -10,6 +10,7 @@ import { onRequestPost as uploadResume, onRequestGet as latestResume } from "../
 import { FILE_TABLE_SQL } from "../functions/api/resumes/_files.js";
 import { listPublicJobs, getPublicJob, jobPosting, plainDescription, matchPublicJobs } from "../functions/api/_public_jobs.js";
 import { onRequestGet as catalogue } from "../functions/vacancies/index.js";
+import { onRequestGet as employerPage } from "../functions/employers.js";
 import { onRequestGet as detail } from "../functions/vacancies/[id].js";
 import { onRequestGet as sitemap } from "../functions/sitemap.xml.js";
 import { onRequestGet as sitemapPage } from "../functions/sitemaps/[page].js";
@@ -227,6 +228,7 @@ test("public catalogue preserves language and search filters through pagination,
   const list = async (query = "") => (await catalogue({ env, request: request("/vacancies" + query) })).text();
   const en = await list("?lang=en&q=Engineer&city=Riyadh&profession=Engineer");
   assert.match(en, /<html lang="en" dir="ltr">/);
+  assert.match(en, /href="\/profile\?lang=en">User profile<\/a>/);
   assert.match(en, /name="lang" value="en"/);
   assert.match(en, /<details class="catalogue-more" open>/);
   assert.match(en, /<button class="btn primary">Search<\/button>/);
@@ -241,6 +243,8 @@ test("public catalogue preserves language and search filters through pagination,
   assert.doesNotMatch(last, />Next<\/a>/);
   const arabic = await list();
   assert.match(arabic, /<html lang="ar" dir="rtl">/);
+  assert.match(arabic, /href="\/profile\?lang=ar">الملف الشخصي<\/a>/);
+  assert.match(await employerPage().text(), /href="\/profile\?lang=ar">الملف الشخصي<\/a>/);
   assert.match(arabic, /name="robots" content="index,follow"/);
   assert.match(arabic, /rel="canonical" href="https:\/\/jobs.wasfai.com\/vacancies"/);
   assert.doesNotMatch(arabic, /<details class="catalogue-more" open>/);

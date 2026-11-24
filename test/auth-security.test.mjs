@@ -36,6 +36,7 @@ test("OAuth return paths reject external, backslash and encoded redirect variant
     assert.equal(safeReturnPath(value), "", value);
   }
   assert.equal(safeReturnPath("/account?tab=cv"), "/account?tab=cv");
+  assert.equal(safeReturnPath("/profile"), "/profile");
 });
 
 test("OAuth start requires complete credentials and durable storage", async () => {
@@ -62,6 +63,24 @@ test("OAuth start pins callback origin, sets PKCE and clears stale consent and r
   const alternate = await start({ env: testEnv, request: new Request("https://preview.pages.dev/api/auth/google/start?terms=1") });
   assert.equal(alternate.headers.get("Location"), "https://jobs.wasfai.com/api/auth/google/start?terms=1");
   assert.equal(alternate.headers.getSetCookie().length, 0);
+});
+
+test("Google sign-in returns new and onboarded users to the requested profile", async t => {
+  const { db } = gatewayFixture(t);
+  for (const destination of ["/profile", "/profile?openrouter=expired"]) {
+    const entry = new URL("https://jobs.wasfai.com/api/auth/google/start");
+    entry.searchParams.set("next", destination);
+    const authorization = await start({ env: testEnv, request: new Request(entry) });
+    const cookie = authorization.headers.getSetCookie().map(value => value.split(";")[0]).join("; ");
+    const state = new URL(authorization.headers.get("Location")).searchParams.get("state");
+    const redirect = new URL("https://jobs.wasfai.com/api/auth/google/callback");
+    redirect.search = new URLSearchParams({ state, code: "synthetic-code" });
+    const response = await callback({ env: testEnv, request: new Request(redirect, { headers: { Cookie: cookie } }) });
+    assert.equal(response.status, 302);
+    assert.equal(response.headers.get("Location"), destination);
+    assert.ok(hasIssuedSession(response));
+    db.prepare("UPDATE users SET onboarding_completed_at=CURRENT_TIMESTAMP WHERE id=?").run("google-user");
+  }
 });
 
 test("callback persists a verified Arabic identity before issuing a session", async (t) => {

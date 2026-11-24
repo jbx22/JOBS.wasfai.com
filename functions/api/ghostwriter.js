@@ -30,7 +30,7 @@ export async function onRequestPost(context) {
     }
     const draft = payload.review_kit ? validateKit(payload.review_kit, sourceResume(profile)) : null;
     if (payload.review_kit && !draft) return json({ error: "Complete both language versions before reviewing.", code: "KIT_INCOMPLETE" }, 400);
-    const writer = await resolveCandidateWriter(context.env, access.user.sub, payload, "ghostwriter");
+    const writer = resolveCandidateWriter(context.env, payload, "ghostwriter");
     if (draft) {
       const review = await reviewKitWithAi(context, access.user, writer, job, profile, draft);
       return json({ quality_review: review, ...writerReceipt(writer) });

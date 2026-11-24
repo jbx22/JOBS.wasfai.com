@@ -73,6 +73,21 @@ export async function requireAuthenticatedState(context) {
   return { user, state };
 }
 
+export async function readAiPreferences(db, userId) {
+  // A new install may receive an AI request before the workspace has been opened.
+  await db.prepare(DOCUMENT_TABLE_SQL).run();
+  const { results } = await db.prepare(
+    "SELECT document_key, payload FROM user_state_documents WHERE user_id = ? AND document_key IN ('aiBillingSource', 'aiPersonalModel')",
+  ).bind(userId).all();
+  const preferences = { aiBillingSource: "jobs", aiPersonalModel: null };
+  for (const { document_key, payload } of results) {
+    const value = JSON.parse(payload);
+    if (!AI_PREFERENCES[document_key].includes(value)) throw new Error("Invalid stored AI preference.");
+    preferences[document_key] = value;
+  }
+  return preferences;
+}
+
 export async function readUserState(db, user) {
   await ensureWorkspaceSchema(db);
   const { results: documents = [] } = await db.prepare(

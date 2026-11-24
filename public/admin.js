@@ -158,7 +158,7 @@ function render() {
       </aside>
       <main class="admin-main" id="admin-main" tabindex="-1">
         <header class="admin-topbar">
-          <div><h1>${pageTitle()}</h1><p>${esc(state.admin.email)} - ${esc(state.admin.role.replace("_", " "))}</p></div>
+          <div><h1>${pageTitle()}</h1><p><a href="/profile?lang=en">User profile · ${esc(state.admin.email)}</a> - ${esc(state.admin.role.replace("_", " "))}</p></div>
           <div class="admin-actions">
             ${mode !== "super" && state.admin.role === "super_admin" ? `<a class="btn blue" href="/super-admin/">Super Admin</a>` : ""}
             ${state.admin.email?.toLowerCase() === OWNER_EMAIL ? '<a class="btn" href="https://sadmin.wasfai.com/?site=jobs">Central Admin</a>' : ""}

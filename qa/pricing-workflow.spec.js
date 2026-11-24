@@ -129,6 +129,7 @@ for (const [width, locale] of [[320, "ar"], [390, "en"]]) {
     await login.click();
     await expect(page).toHaveURL(origin + next);
     await expect(page.locator("[data-plan-intent]")).toBeVisible();
+    await expect(page.getByRole("link", { name: locale === "ar" ? "الملف الشخصي" : "User profile" })).toHaveAttribute("href", "/profile?lang=" + locale);
     expect(f.starts).toEqual([]);
     expect(f.oauth).toEqual([{ terms: "1", next }]);
     await choose(page, paidPlan).click();

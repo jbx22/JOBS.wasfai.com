@@ -89,7 +89,7 @@ The account flow is Google-first and uses secure signed HttpOnly cookies:
 
 Cloudflare Pages secrets/vars:
 
-- `AUTH_COOKIE_SECRET` signs session cookies and derives separate per-account encryption keys for personal OpenRouter credentials. After rotating this secret, customers must sign in again and reconnect OpenRouter in Account before using their personal credits. They can revoke previously issued keys in their OpenRouter key settings.
+- `AUTH_COOKIE_SECRET` signs session cookies and derives separate per-account encryption keys for personal OpenRouter credentials. After rotating this secret, customers must sign in again and reconnect OpenRouter in Profile before using their personal credits. They can revoke previously issued keys in their OpenRouter key settings.
 - `GOOGLE_CLIENT_ID` from Google Cloud OAuth Client.
 - `GOOGLE_CLIENT_SECRET` from Google Cloud OAuth Client.
 - Optional `AUTH_REDIRECT_ORIGIN`; default is the current request origin.

@@ -164,10 +164,18 @@ test("PostgreSQL: OAuth, employer moderation, public filters and invoice replay 
     const linked = await openRouterCallback({ env: testEnv, request: new Request(returnUrl, {
       headers: { Cookie: cookie + "; " + started.headers.get("Set-Cookie").split(";")[0] },
     }) });
-    assert.equal(linked.headers.get("Location"), "/account?openrouter=connected");
+    assert.equal(linked.headers.get("Location"), "/profile?openrouter=connected");
     const draft = () => writeAnswer(personalContext("/api/ai-writer-chat", {
       billing_source: "openrouter_personal", ai_model: "gpt-4.1-mini", question: "How should I prepare for this interview?",
     }));
+    const unconfirmed = await draft();
+    assert.equal(unconfirmed.status, 409);
+    assert.equal((await unconfirmed.json()).code, "AI_PREFERENCE_CHANGED");
+    await writeUserState(db, employer, { aiBillingSource: "openrouter_personal", aiPersonalModel: "gpt-4.1-mini" });
+    const stale = await writeAnswer(personalContext("/api/ai-writer-chat", { question: "Stale tab, no payer selected" }));
+    assert.equal(stale.status, 409);
+    assert.equal((await stale.json()).code, "AI_PREFERENCE_CHANGED");
+    assert.equal(personalCalls, 0);
     assert.equal((await draft()).status, 200);
     const report = await (await operate("ai")).json();
     assert.equal(report.usage.personal_metered_requests, 1);

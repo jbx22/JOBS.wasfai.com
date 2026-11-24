@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import { onRequestPost as coach } from "../functions/api/resume-coach.js";
 import { onRequestPost as chat } from "../functions/api/ai-writer-chat.js";
 import { encryptCredential, getUserOpenRouterKey } from "../functions/api/openrouter/_shared.js";
+import { getJobDb } from "../functions/api/_db.js";
+import { writeUserState } from "../functions/api/_state.js";
 import { sessionCookie } from "../functions/api/auth/_auth.js";
 import { gatewayFixture, testEnv } from "./helpers/gateway.mjs";
 
@@ -29,6 +31,12 @@ async function connect(db, owner = "google-user") {
     .run(owner, await encryptCredential(bindings, owner, personalKey));
 }
 
+function saveChoice(billing_source, ai_model = selected.ai_model) {
+  return writeUserState(getJobDb(bindings), { sub: "google-user" }, {
+    aiBillingSource: billing_source, aiPersonalModel: ai_model,
+  });
+}
+
 function completion(text) {
   return Response.json({ choices: [{ message: { content: text } }], usage: { prompt_tokens: 40, completion_tokens: 20 } });
 }
@@ -48,6 +56,7 @@ test("personal coaching pins DeepInfra and offers an explicit retry after a paid
     ...selected, ai_model: "deepseek-v4.1-flash", profile,
     provider: { only: ["other"] }, key: "untrusted-client-key", url: "https://client-input.test",
   };
+  await saveChoice(input.billing_source, input.ai_model);
   const incomplete = await send(coach, input);
   assert.equal(incomplete.status, 503);
   assert.equal((await incomplete.json()).code, "AI_INVALID_DRAFT");
@@ -88,6 +97,11 @@ test("chat pins OpenAI for every writing intent, and a connection alone never ch
   addUser();
   await connect(db);
   const input = { question: "Draft a short reply.", profile };
+  const legacy = await send(chat, input);
+  assert.equal((await legacy.json()).billing_source, "jobs");
+  assert.equal(calls.at(-1).url, "https://api.openai.com/v1/chat/completions");
+  assert.equal(calls.at(-1).header, "Bearer platform-openai-fixture");
+  await saveChoice(selected.billing_source);
   for (const intent of ["interview", "application_answer", "recruiter_reply", "followup_email"]) {
     const response = await send(chat, { ...selected, ...input, intent });
     assert.equal(response.status, 200);
@@ -98,10 +112,7 @@ test("chat pins OpenAI for every writing intent, and a connection alone never ch
     assert.equal(last.body.model, "openai/gpt-4.1-mini");
     assert.deepEqual(last.body.provider, { only: ["openai"], allow_fallbacks: false });
   }
-  const legacy = await send(chat, input);
-  assert.equal((await legacy.json()).billing_source, "jobs");
-  assert.equal(calls.at(-1).url, "https://api.openai.com/v1/chat/completions");
-  assert.equal(calls.at(-1).header, "Bearer platform-openai-fixture");
+  await saveChoice("jobs");
   const explicit = await send(chat, { ...input, billing_source: "jobs", ai_model: "minimax-m3" });
   assert.equal((await explicit.json()).billing_source, "jobs");
   assert.equal(calls.at(-1).url, "https://configured-platform-proxy.test/chat/completions");
@@ -114,6 +125,7 @@ test("missing, other-owner, corrupt and unrecognized personal selections fail be
   addUser();
   addUser("active", { sub: "other-user", email: "other@example.test" });
   await connect(db, "other-user");
+  await saveChoice(selected.billing_source);
   const input = { ...selected, question: "Reply.", owner: "other-user", user_id: "other-user", api_key: personalKey };
   assert.equal((await send(chat, input, "")).status, 401);
   for (const [payload, code] of [
@@ -143,6 +155,7 @@ test("personal provider failures preserve the payer, never follow redirects, and
   } });
   addUser();
   await connect(db);
+  await saveChoice(selected.billing_source);
   for (const [upstream, http, code] of [
     [401, 403, "OPENROUTER_RECONNECT_REQUIRED"], [403, 403, "OPENROUTER_REQUEST_DENIED"],
     [402, 402, "OPENROUTER_CREDITS_REQUIRED"], [200, 402, "OPENROUTER_CREDITS_REQUIRED"], [429, 429, "AI_BUSY"],
@@ -161,4 +174,44 @@ test("personal provider failures preserve the payer, never follow redirects, and
   }
   assert.equal(db.prepare("SELECT COUNT(*) AS n FROM ai_usage WHERE provider='openrouter_personal' AND status='provider_error' AND cost_usd=0").get().n, calls.length);
   assert.ok(!JSON.stringify(db.prepare("SELECT * FROM ai_usage").all()).includes("sensitive-upstream-details"));
+});
+
+
+test("new requests from a stale tab cannot change the saved payer or personal model", async t => {
+  let calls = 0;
+  let failRead = false;
+  const reads = [];
+  const { db, addUser } = gatewayFixture(t, {
+    beforeQuery(query) {
+      if (query.sql?.includes("document_key IN")) {
+        reads.push(query);
+        if (failRead) throw new Error("Synthetic database outage");
+      }
+    },
+    otherFetch() { calls++; return completion("Unexpected"); },
+  });
+  addUser();
+  await connect(db);
+  const question = "Could you help me prepare?";
+  const stale = async (handler, payload) => {
+    const response = await send(handler, payload);
+    assert.equal(response.status, 409);
+    assert.equal((await response.json()).code, "AI_PREFERENCE_CHANGED");
+  };
+  await stale(chat, { ...selected, question }); // Connection exists, but personal billing was never selected.
+  await saveChoice(selected.billing_source);
+  await stale(chat, { question }); // A legacy tab omits the payer.
+  await stale(coach, { billing_source: "jobs", profile });
+  await stale(chat, { ...selected, ai_model: "deepseek-v4.1-flash", question });
+  await saveChoice("jobs");
+  await stale(chat, { ...selected, question });
+  assert.equal(calls, 0);
+  assert.equal(reads.length, 5);
+  assert.ok(reads.every(q => q.params.length === 1 && q.params[0] === "google-user" &&
+    q.sql.includes("'aiBillingSource', 'aiPersonalModel'")));
+  failRead = true;
+  const unavailable = await send(chat, { question });
+  assert.equal(unavailable.status, 503);
+  assert.equal((await unavailable.json()).code, "AI_PREFERENCE_UNAVAILABLE");
+  assert.equal(calls, 0);
 });
