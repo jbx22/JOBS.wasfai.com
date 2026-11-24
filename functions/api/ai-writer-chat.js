@@ -32,7 +32,7 @@ export async function onRequestPost(context) {
       return json({ error: "Enter a question or application context.", code: "BAD_REQUEST" }, 400);
     }
 
-    const writer = await resolveCandidateWriter(context.env, access.user.sub, payload, "ai-writer-chat");
+    const writer = resolveCandidateWriter(context.env, payload, "ai-writer-chat");
     const answer = await askAi(context, access.user, writer, job, profile, kit, question, history, intent);
     return json({ ...writerReceipt(writer), writer_label: writer.label, answer });
   } catch (error) {

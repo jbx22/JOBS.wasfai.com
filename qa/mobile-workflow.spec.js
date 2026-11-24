@@ -29,6 +29,8 @@ async function startWorkspace(page, locale) {
         if (request.method() === "PUT") state = request.postDataJSON().state;
         return route.fulfill({ json: { authenticated: true, state, storage: "postgres-normalized" } });
       case "/api/ai-health": return route.fulfill({ json: { ready: true } });
+      case "/api/openrouter/status": return route.fulfill({ json: { connected: false, connected_at: null } });
+      case "/api/subscriptions": return route.fulfill({ json: { authenticated: true, current: { plan: "free", effective_plan: "free", status: "active", paid_active: false } } });
       case "/api/resumes": return route.fulfill({ json: { file: null } });
       case "/api/sources": return route.fulfill({ json: { sources: [] } });
       case "/api/jobs/search":
@@ -53,7 +55,7 @@ function navTo(page, pathname) {
 async function assertUsableNavigation(page, pathname) {
   const current = navTo(page, pathname);
   await expect(current).toHaveAttribute("aria-current", "page");
-  const targets = ["/app", "/jobs", "/account", "/results"].map(href => navTo(page, href));
+  const targets = ["/app", "/jobs", "/account", "/results", "/profile"].map(href => navTo(page, href));
   for (const target of targets) {
     await expect(target).toHaveCount(1);
     const accessible = await target.evaluate(element => {
@@ -110,6 +112,10 @@ for (const [width, height] of viewports) {
       await assertInputsFit(page);
       await page.goBack();
       await expect(page).toHaveURL(/\/app$/);
+      await navTo(page, "/profile").click();
+      await assertUsableNavigation(page, "/profile");
+      await expect(page.locator("[data-user-profile]")).toBeVisible();
+      await assertInputsFit(page);
       await navTo(page, "/account").click();
       await assertUsableNavigation(page, "/account");
       await assertInputsFit(page);

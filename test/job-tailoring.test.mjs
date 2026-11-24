@@ -185,6 +185,7 @@ test("personal CV and letter requests use one generation and its disclosed revie
   db.prepare("INSERT INTO user_openrouter_connections(user_id,credential) VALUES (?,?)")
     .run("google-user", await encryptCredential(env, "google-user", "tailoring-personal-fixture"));
   const payload = { job, profile, billing_source: "openrouter_personal", ai_model: "gpt-4.1-mini" };
+  await writeUserState(getJobDb(env), { sub: "google-user" }, { aiBillingSource: payload.billing_source, aiPersonalModel: payload.ai_model });
   const invalid = await call(generate, payload);
   assert.equal((await invalid.json()).code, "AI_INVALID_DRAFT");
   assert.equal(calls.length, 1);
@@ -214,4 +215,34 @@ test("personal CV and letter requests use one generation and its disclosed revie
     ["ghostwriter.generate", "invalid_output"], ["ghostwriter.generate", "ok"],
     ["ghostwriter.review", "provider_error"], ["ghostwriter.review", "ok"],
   ]);
+});
+
+test("changing payer or disconnecting during generation preserves the draft and stops the subsequent paid review", async t => {
+  const user = { sub: "google-user" };
+  const db = getJobDb(env);
+  const payload = { job, profile, billing_source: "openrouter_personal", ai_model: "gpt-4.1-mini" };
+  let change, calls = 0;
+  const fixture = gatewayFixture(t, { async otherFetch() {
+    calls++;
+    if (change === "payer") await writeUserState(db, user, { aiBillingSource: "jobs", aiPersonalModel: payload.ai_model });
+    else fixture.db.prepare("UPDATE user_openrouter_connections SET credential='' WHERE user_id=?").run(user.sub);
+    return providerReply(draft);
+  } });
+  fixture.addUser();
+  await getUserOpenRouterKey(env, user.sub);
+  fixture.db.prepare("INSERT INTO user_openrouter_connections(user_id,credential) VALUES (?,?)")
+    .run(user.sub, await encryptCredential(env, user.sub, "temporary-personal-fixture"));
+  for (const [reason, code] of [["payer", "AI_PREFERENCE_CHANGED"], ["disconnect", "OPENROUTER_NOT_CONNECTED"]]) {
+    change = reason;
+    await writeUserState(db, user, { aiBillingSource: payload.billing_source, aiPersonalModel: payload.ai_model });
+    const before = calls;
+    const response = await call(generate, payload);
+    const kit = await response.json();
+    assert.equal(response.status, 200);
+    assert.equal(kit.en_cover_letter, draft.en_cover_letter);
+    assert.equal(kit.quality_review.approved, false);
+    assert.equal(kit.review_error_code, code);
+    assert.equal(calls, before + 1);
+  }
+  assert.equal(fixture.db.prepare("SELECT count(*) AS n FROM ai_usage WHERE route='ghostwriter.review'").get().n, 0);
 });

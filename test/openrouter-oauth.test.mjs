@@ -50,7 +50,7 @@ function outcome(response) {
   assert.match(response.headers.get("Cache-Control"), /no-store/);
   assert.equal(response.body, null);
   const target = response.headers.get("location");
-  assert.match(target, /^\/account\?openrouter=(?:connected|expired|cancelled|error)$/);
+  assert.match(target, /^\/profile\?openrouter=(?:connected|expired|cancelled|error)$/);
   return target.split("=")[1];
 }
 

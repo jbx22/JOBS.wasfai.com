@@ -304,3 +304,7 @@
 
 - Add optional personal OpenRouter billing and provider selection for résumé coaching and application writing
 
+## jobs81 — 2026-11-24 15:56
+
+- Centralize OpenRouter connection, billing and model preferences in the bilingual user profile for résumé and writing tools
+

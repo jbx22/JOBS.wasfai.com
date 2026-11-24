@@ -1,6 +1,8 @@
 import { PERSONAL_AI_MODELS } from "../../public/personal-ai-models.js";
 import { PERSONAL_OPENROUTER_PROVIDER, recordAiUsage } from "./_ai_usage.js";
 import { DEEPSEEK_BASE_URL, DEEPSEEK_LABEL, DEEPSEEK_MODEL, deepseekModel, resumeDeepseekKey } from "./_deepseek.js";
+import { getJobDb } from "./_db.js";
+import { readAiPreferences } from "./_state.js";
 import { getUserOpenRouterKey } from "./openrouter/_shared.js";
 
 const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
@@ -47,8 +49,7 @@ function platformWriter(env, payload, route) {
   };
 }
 
-export async function resolveCandidateWriter(env, userId, payload, route) {
-  // A connection alone does not authorize spending it on a request from an older client.
+export function resolveCandidateWriter(env, payload, route) {
   const source = Object.hasOwn(payload, "billing_source") ? payload.billing_source : "jobs";
   if (source === "jobs") return { ...platformWriter(env, payload, route), billingSource: source };
   if (source !== PERSONAL_OPENROUTER_PROVIDER) {
@@ -56,6 +57,24 @@ export async function resolveCandidateWriter(env, userId, payload, route) {
   }
   const option = PERSONAL_AI_MODELS.find(item => item.id === payload.ai_model);
   if (!option) throw new CandidateAiError("PERSONAL_MODEL_REQUIRED", "Select a supported model and inference provider.", 400);
+  return {
+    billingSource: source, provider: PERSONAL_OPENROUTER_PROVIDER, modelId: option.id, label: option.label,
+    model: option.model, host: option.host, hostSlug: option.hostSlug, baseUrl: OPENROUTER_BASE_URL,
+  };
+}
+
+async function authorizedKey(env, userId, writer) {
+  let saved;
+  try {
+    saved = await readAiPreferences(getJobDb(env), userId);
+  } catch {
+    throw new CandidateAiError("AI_PREFERENCE_UNAVAILABLE", "Your saved AI settings could not be verified. Try again.", 503);
+  }
+  const personal = writer.billingSource === PERSONAL_OPENROUTER_PROVIDER;
+  if (writer.billingSource !== saved.aiBillingSource || (personal && writer.modelId !== saved.aiPersonalModel)) {
+    throw new CandidateAiError("AI_PREFERENCE_CHANGED", "Reload your user profile and review the saved AI account and model before trying again.", 409);
+  }
+  if (!personal) return writer.apiKey;
   let apiKey;
   try {
     apiKey = await getUserOpenRouterKey(env, userId);
@@ -66,10 +85,7 @@ export async function resolveCandidateWriter(env, userId, payload, route) {
     throw new CandidateAiError("OPENROUTER_CONNECTION_UNAVAILABLE", "Your OpenRouter connection could not be read. Try again.", 503);
   }
   if (!apiKey) throw new CandidateAiError("OPENROUTER_NOT_CONNECTED", "Connect your OpenRouter account to use its credits.", 409);
-  return {
-    billingSource: source, provider: PERSONAL_OPENROUTER_PROVIDER, label: option.label, model: option.model,
-    host: option.host, hostSlug: option.hostSlug, apiKey, baseUrl: OPENROUTER_BASE_URL,
-  };
+  return apiKey;
 }
 
 export function writerReceipt(writer) {
@@ -91,7 +107,9 @@ function upstreamFailure(writer, status) {
 // All attempted completions, including paid but unusable answers, get one usage row.
 // The credential, upstream error body, prompt and generated text never enter telemetry.
 export async function candidateCompletion(context, user, writer, route, body, signal, readContent) {
-  if (!writer.apiKey) throw upstreamFailure(writer);
+  // A later completion (such as quality review) must recheck a payer or connection changed in another tab.
+  const apiKey = await authorizedKey(context.env, user.sub, writer);
+  if (!apiKey) throw upstreamFailure(writer);
   let usage;
   let status = "provider_error";
   try {
@@ -99,7 +117,7 @@ export async function candidateCompletion(context, user, writer, route, body, si
     const response = await fetch(`${base}/chat/completions`, {
       method: "POST", redirect: "manual", signal,
       headers: {
-        Authorization: `Bearer ${writer.apiKey}`, "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json",
         ...(base === OPENROUTER_BASE_URL ? { "HTTP-Referer": "https://jobs.wasfai.com", "X-Title": "JOBS.wasfai.com AI Writer" } : {}),
       },
       body: JSON.stringify({

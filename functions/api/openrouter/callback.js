@@ -3,7 +3,7 @@ import { accountAction, codeVerifier, encryptCredential, sessionFingerprint } fr
 
 function finish(outcome) {
   return new Response(null, { status: 303, headers: {
-    Location: "/account?openrouter=" + outcome,
+    Location: "/profile?openrouter=" + outcome,
     "Cache-Control": "no-store, private",
     "Referrer-Policy": "no-referrer",
   } });
@@ -44,6 +44,6 @@ export async function onRequestGet(context) {
       .bind(await encryptCredential(context.env, owner, key), new Date().toISOString(), owner, hash).run();
     return finish(saved.meta.changes ? "connected" : "expired");
   });
-  // Callback URLs can contain an authorization code. Always leave the browser on a clean account URL.
+  // Callback URLs can contain an authorization code. Always leave the browser on a clean profile URL.
   return response.status === 303 ? response : finish([401, 403].includes(response.status) ? "expired" : "error");
 }

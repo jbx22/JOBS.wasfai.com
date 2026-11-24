@@ -19,9 +19,10 @@ export function page(title, content, options = {}) {
   const canonical = "https://jobs.wasfai.com" + path;
   const en = options.lang === "en";
   const schema = options.schema ? '<script type="application/ld+json">' + JSON.stringify(options.schema).replace(/</g, "\\u003c") + "</script>" : "";
+  const profileLink = `<a href="/profile?lang=${en ? "en" : "ar"}">${en ? "User profile" : "الملف الشخصي"}</a>`;
   const navigation = options.lang
-    ? `<a href="/vacancies${e(catalogueQuery(options.searchParams, options.lang))}">${en ? "Browse jobs" : "تصفح الوظائف"}</a><a href="/applications${en ? "?lang=en" : ""}">${en ? "My applications" : "طلباتي"}</a><a href="${e(path + catalogueQuery(options.searchParams, en ? "ar" : "en"))}" hreflang="${en ? "ar" : "en"}" lang="${en ? "ar" : "en"}">${en ? "العربية" : "English"}</a>`
-    : '<a href="/vacancies">الوظائف العامة</a><a href="/employers">أصحاب العمل</a><a href="/applications">طلباتي</a><a href="/account">حسابي</a>';
+    ? `<a href="/vacancies${e(catalogueQuery(options.searchParams, options.lang))}">${en ? "Browse jobs" : "تصفح الوظائف"}</a><a href="/applications${en ? "?lang=en" : ""}">${en ? "My applications" : "طلباتي"}</a>${profileLink}<a href="${e(path + catalogueQuery(options.searchParams, en ? "ar" : "en"))}" hreflang="${en ? "ar" : "en"}" lang="${en ? "ar" : "en"}">${en ? "العربية" : "English"}</a>`
+    : `<a href="/vacancies">الوظائف العامة</a><a href="/employers">أصحاب العمل</a><a href="/applications">طلباتي</a>${profileLink}`;
   return new Response(`<!doctype html><html lang="${en ? "en" : "ar"}" dir="${en ? "ltr" : "rtl"}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
   <title>${e(title)} | JOBS.wasfai.com</title><meta name="description" content="${e(options.description || (en ? "Job openings and applications on Jobs Wasfai." : "فرص عمل موثقة ومساحة توظيف لأصحاب العمل والباحثين عن عمل."))}">
   <meta name="robots" content="${options.private ? "noindex,nofollow" : "index,follow"}">

@@ -37,7 +37,7 @@ export async function onRequestPost(context) {
       resume_text: resumeText,
     };
     try {
-      const writer = await resolveCandidateWriter(context.env, access.user.sub, payload, "resume-coach");
+      const writer = resolveCandidateWriter(context.env, payload, "resume-coach");
       const draft = await improveWithAi(context, access.user, writer, profile, sourceProfile);
       return json({ ...draft, ...writerReceipt(writer), source_profile: sourceProfile });
     } catch (error) {

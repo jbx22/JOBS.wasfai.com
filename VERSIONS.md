@@ -4,6 +4,7 @@ Sequential snapshots of the project. Each version is a frozen copy of the source
 
 | Version | Date | Description |
 | --- | --- | --- |
+| jobs81 | 2026-11-24 15:56 | Centralize OpenRouter connection, billing and model preferences in the bilingual user profile for résumé and writing tools |
 | jobs80 | 2026-11-24 15:34 | Add optional personal OpenRouter billing and provider selection for résumé coaching and application writing |
 | jobs79 | 2026-11-24 14:55 | Improve subscription management, checkout and payment verification |
 | jobs78 | 2026-11-24 14:00 | Simplify the mobile résumé, search and job application workflows |

@@ -33,6 +33,7 @@ const NAV = [
   { id: "jobs", ar: "الوظائف", en: "Jobs", route: "/jobs", icon: iconList },
   { id: "account", ar: "سيرتي", en: "My résumé", route: "/account", icon: iconDoc },
   { id: "results", ar: "المتابعة", en: "Follow-up", route: "/results", icon: iconClock },
+  { id: "profile", ar: "حسابي", en: "Profile", route: "/profile", icon: iconUser },
 ];
 const SETTINGS_NAV = { id: "settings", ar: "الإعدادات", en: "Settings", route: "/settings", icon: iconCog };
 
@@ -255,7 +256,13 @@ function loadPreferences() {
     state.locale = "ar";
     state.theme = "light";
   }
-  applyPreferences();
+  const language = new URLSearchParams(location.search).get("lang");
+  if (language === "en" || language === "ar") {
+    state.locale = language;
+    savePreferences();
+  } else {
+    applyPreferences();
+  }
 }
 
 function savePreferences() {
@@ -418,6 +425,7 @@ function routeOf() {
   if (r === "jobs") return { name: "jobs-list" };
   if (r === "settings" || r === "settings/sources") return { name: "settings" };
   if (r === "account") return { name: "account" };
+  if (r === "profile" || r === "profile/") return { name: "profile" };
   if (r === "login") return { name: "login" };
   if (r === "onboarding") return { name: "onboarding" };
   if (r === "terms") return { name: "legal", page: "terms" };
@@ -666,13 +674,19 @@ async function loadWorkspaceState() {
   }
 }
 
+let deferredResumeOwner = "";
 async function loadResumeFile() {
-  if (!state.session?.authenticated) return;
+  const owner = accountId();
+  const prior = state.resumeFile;
+  if (!owner) return;
   try {
     const response = await accountFetch("/api/resumes", { cache: "no-store" });
-    if (response.ok) state.resumeFile = (await response.json()).file || null;
+    if (response.ok) {
+      const payload = await response.json();
+      if (owner === accountId() && prior === state.resumeFile) state.resumeFile = payload.file || null;
+    }
   } catch {
-    state.resumeFile = null;
+    if (owner === accountId() && prior === state.resumeFile) state.resumeFile = null;
   }
 }
 
@@ -1214,9 +1228,9 @@ function shell(content, options = {}) {
 
 function renderTopbar() {
   const en = state.locale === "en";
-  const name = state.profile?.display_name || state.session?.user?.name || "";
-  const accountRoute = state.session?.authenticated ? "/account" : "/login";
-  const accountLabel = state.session?.authenticated ? (en ? "My account" : "حسابي") : (en ? "Sign in or create an account" : "تسجيل الدخول أو إنشاء حساب");
+  const name = state.session?.user?.name || "";
+  const accountRoute = state.session?.authenticated ? "/profile" : "/login?next=%2Fprofile";
+  const accountLabel = state.session?.authenticated ? (en ? "User profile" : "الملف الشخصي") : (en ? "Sign in or create an account" : "تسجيل الدخول أو إنشاء حساب");
   return `<header class="topbar">
     <a class="brand" href="/app" data-nav="/app" aria-label="${en ? "Jobs home" : "الصفحة الرئيسية للوظائف"}">
       ${brandLogo()}<span class="brand-name" lang="en" dir="ltr">JOBS.wasfai.com</span>
@@ -1672,9 +1686,6 @@ function renderGhostwriterPanel(job, kit) {
   const generatedAt = kit?.generated_at ? new Date(kit.generated_at).toLocaleString("ar-SA") : "";
   const resumeReady = originalResumeReady();
   const approved = Boolean(state.approvedKits?.[job.id] && kit?.quality_review?.approved);
-  const modelOptions = AI_WRITER_MODELS.map(
-    (model) => `<option value="${esc(model.id)}" ${state.aiWriterModel === model.id ? "selected" : ""}>${esc(model.label)}</option>`,
-  ).join("");
   return `<div class="section-block ghostwriter-panel">
     <div class="section-head tight">
       <div>
@@ -1683,11 +1694,7 @@ function renderGhostwriterPanel(job, kit) {
       </div>
       ${hasKit ? `<span class="badge">${esc(provider)}</span>` : ""}
     </div>
-    ${aiActionOptions("writer", true)}
-    <div class="field compact-field" ${state.aiBillingSource === PERSONAL_SOURCE ? "hidden" : ""}>
-      <label for="job-writer-model">${en ? "Writing model" : "نموذج الكتابة"}</label>
-      <select id="job-writer-model" data-ai-writer-model>${modelOptions}</select>
-    </div>
+    ${aiActionOptions("writer")}
     <div class="field">
       <label for="job-tailoring-notes">${state.locale === "en" ? "Full job posting or recruiter notes" : "إعلان الوظيفة الكامل أو ملاحظات مسؤول التوظيف"}</label>
       <textarea id="job-tailoring-notes" data-tailoring-brief="${esc(job.id)}" placeholder="${state.locale === "en" ? "Paste the full posting if the imported description is incomplete." : "الصق إعلان الوظيفة كاملاً إذا كان الوصف المستورد مختصراً."}">${esc(state.tailoringBriefs?.[job.id] || "")}</textarea>
@@ -1810,7 +1817,7 @@ function renderApplicationDrafts(job) {
     <form class="form profile-form" data-application-draft="${esc(job.id)}">
       <label class="field">${english ? "Draft type" : "نوع المسودة"}<select name="kind">${Object.entries(options).map(([value, label]) => `<option value="${value}" ${value === kind ? "selected" : ""}>${label}</option>`).join("")}</select></label>
       <label class="field full">${english ? "Question or message to address" : "السؤال أو الرسالة المطلوب الرد عليها"}<textarea name="context" maxlength="3500">${esc(task?.context || "")}</textarea></label>
-      ${aiActionOptions("reply", true)}
+      ${aiActionOptions("reply")}
       <button class="btn primary" type="submit" ${masterResumeReady() && state.session?.authenticated && !aiBlocked() ? "" : "disabled"}>${english ? "Draft for review" : "إنشاء مسودة للمراجعة"}</button>
       ${draft ? `<label class="field full">${english ? "Draft to review and edit" : "المسودة للمراجعة والتعديل"}<textarea name="draft" maxlength="12000">${esc(draft)}</textarea></label><button class="btn outline" type="button" data-copy-application-draft>${english ? "Copy draft" : "نسخ المسودة"}</button>` : ""}
     </form>
@@ -2046,10 +2053,10 @@ function accountLabel(arabic, english) {
   return state.locale === "en" ? english : arabic;
 }
 
-let aiAccount = { owner: "", connected: null, loading: false, managerOpen: false, notice: "", pause: "", confirming: false, busy: false };
+let aiAccount = { owner: "", connected: null, loading: false, checked: false, notice: "", pause: "", confirming: false, busy: false };
 function aiConnection() {
   const owner = accountId();
-  if (aiAccount.owner !== owner) aiAccount = { owner, connected: null, loading: false, managerOpen: false, notice: "", pause: "", confirming: false, busy: false };
+  if (aiAccount.owner !== owner) aiAccount = { owner, connected: null, loading: false, checked: false, notice: "", pause: "", confirming: false, busy: false };
   return aiAccount;
 }
 
@@ -2062,37 +2069,60 @@ function billingSelection(jobsModel = state.aiWriterModel) {
 
 function aiBlocked() {
   const connection = aiConnection();
-  return !connection.owner || connection.owner !== workspaceOwner || connection.savingChoice || connection.choiceError || (state.aiBillingSource === PERSONAL_SOURCE && (connection.connected !== true || Boolean(connection.pause)));
+  return !connection.owner || connection.owner !== workspaceOwner || connection.savingChoice || connection.choiceError || connection.stalePreference || connection.refreshingPrefs || (state.aiBillingSource === PERSONAL_SOURCE && (connection.busy || connection.connected !== true || Boolean(connection.pause)));
 }
 
-function aiActionOptions(task, chooser = false, jobsModel = state.aiWriterModel) {
+function aiPreferenceFeedback(connection) {
+  const t = accountLabel;
+  if (connection.stalePreference) return t("تغيّرت إعدادات الذكاء الاصطناعي في حسابك. حدّثها من الملف الشخصي قبل إرسال طلب آخر.", "Your saved AI settings changed. Refresh them in User Profile before sending another request.");
+  if (connection.choiceError) return t("تعذّر حفظ اختيارك. راجع إعدادات الذكاء الاصطناعي في الملف الشخصي.", "Your billing choice could not be saved. Review your AI settings in User Profile.");
+  if (connection.owner !== workspaceOwner) return t("تعذّر تحميل تفضيلات حسابك. أعد المحاولة من الملف الشخصي.", "Your account settings could not be loaded. Try again from User Profile.");
+  if (connection.savingChoice) return t("جارٍ حفظ اختيارك…", "Saving your billing preference…");
+  return "";
+}
+
+function aiActionOptions(task, jobsModel = state.aiWriterModel) {
   if (!accountId()) return "";
   const t = accountLabel;
   const connection = aiConnection();
   const { billing_source, ai_model } = billingSelection(jobsModel);
   const personal = billing_source === PERSONAL_SOURCE;
-  const modelName = aiDisclosure(state.locale, billing_source, ai_model, jobsModel, task);
-  const options = PERSONAL_AI_MODELS.map(item => `<option value="${esc(item.id)}" ${item.id === ai_model ? "selected" : ""}>${esc(item.label)} · ${esc(item.host)}</option>`).join("");
+  const paused = personal && (connection.pause || connection.connected !== true);
+  const feedback = aiPreferenceFeedback(connection) || (paused ? (connection.pause ? personalErrorText(connection.pause, state.locale)
+    : connection.loading ? t("جارٍ التحقق من الاتصال…", "Checking your connection…") : t("الطلب متوقف إلى أن يتم التحقق من اتصال OpenRouter.", "This request is paused until your OpenRouter connection is verified.")) : "");
   return `<div class="ai-funding" data-ai-funding="${task}">
-    ${chooser ? `<div class="ai-funding-options">
-      <label>${t("مصدر رصيد الذكاء الاصطناعي", "Who pays for AI?")}
-        <select data-ai-payer><option value="jobs" ${personal ? "" : "selected"}>${t("رصيد Jobs ضمن باقتي", "Jobs plan credits")}</option>
-        <option value="openrouter_personal" ${personal ? "selected" : ""}>${t("رصيدي الشخصي في OpenRouter", "My OpenRouter credits")}</option></select></label>
-      ${personal ? `<label>${t("النموذج ومزوّد الاستدلال", "Model and inference provider")}<select data-personal-model>${options}</select></label>` : ""}
-    </div>` : ""}
-    <p data-ai-disclosure>${esc(modelName)}</p>
-    ${connection.savingChoice ? `<p role="status">${t("جارٍ حفظ اختيارك…", "Saving your billing preference…")}</p>` : ""}
-    ${connection.choiceError ? `<p role="alert">${t("تعذّر حفظ اختيارك. حدّث الصفحة وراجع مصدر الرصيد قبل المتابعة.", "Your billing choice could not be saved. Refresh and review the selected credits before continuing.")}</p>` : ""}
-    ${connection.owner !== workspaceOwner ? `<p role="status">${t("تعذّر تحميل تفضيل الدفع من حسابك. حدّث الصفحة قبل استخدام الذكاء الاصطناعي.", "Your billing preference could not be loaded. Refresh the page before using AI.")}</p>` : ""}
-    ${personal && chooser && (connection.connected !== true || connection.pause) ? `<div class="ai-funding-warning" role="status">
-      <p>${connection.pause ? esc(personalErrorText(connection.pause,state.locale)) : connection.loading ? t("جارٍ التحقق من الاتصال…", "Checking your connection…") : connection.connected === false ? t("اربط حسابك الشخصي قبل إرسال الطلب.", "Connect your personal account before sending a request.") : t("لم يتم التحقق من اتصالك بعد.", "Your connection has not been verified yet.")}</p>
-      <div class="ai-funding-actions">
-        ${connection.connected === true && connection.pause ? `<button class="btn outline" type="button" data-retry-personal>${t("المتابعة بالرصيد الشخصي", "Continue with personal credits")}</button>` : ""}
-        <button class="btn outline" type="button" data-open-ai-connections>${t("إدارة اتصال OpenRouter", "Manage OpenRouter connection")}</button>
-        <button class="btn outline" type="button" data-switch-ai-jobs>${t("استخدام رصيد Jobs بدلاً من ذلك", "Switch to Jobs credits")}</button>
-      </div>
-    </div>` : ""}
+    <p data-ai-disclosure>${esc(aiDisclosure(state.locale, billing_source, ai_model, jobsModel, task))}</p>
+    ${feedback ? `<p role="status">${esc(feedback)}</p>` : ""}
+    <a href="/profile" data-nav="/profile" data-open-ai-connections>${t("إدارة إعدادات الذكاء الاصطناعي في الملف الشخصي", "Manage AI settings in User Profile")}</a>
   </div>`;
+}
+
+function renderProfileSettings(connection) {
+  const t = accountLabel;
+  const { billing_source, ai_model } = billingSelection();
+  const personal = billing_source === PERSONAL_SOURCE;
+  const unavailable = connection.owner !== workspaceOwner || connection.stalePreference || connection.choiceError;
+  const models = personal ? PERSONAL_AI_MODELS : AI_WRITER_MODELS;
+  const opts = models.map(item => `<option value="${esc(item.id)}" ${item.id === ai_model ? "selected" : ""}>${esc(item.label)}${item.host ? " · " + esc(item.host) : ""}</option>`).join("");
+  const feedback = aiPreferenceFeedback(connection);
+  return `<section class="section-block account-block" data-profile-ai aria-labelledby="ai-settings-title">
+    <h2 id="ai-settings-title">${t("إعدادات الذكاء الاصطناعي", "AI settings")}</h2>
+    ${renderAiConnections()}
+    <div class="ai-funding-options">
+      <label>${t("من يتحمّل تكلفة طلبات الذكاء الاصطناعي؟", "Who pays for AI requests?")}
+        <select data-ai-payer ${unavailable ? "disabled" : ""}>
+          <option value="jobs" ${personal ? "" : "selected"}>${t("رصيد Jobs ضمن باقتي", "Jobs plan credits")}</option>
+          <option value="openrouter_personal" ${personal ? "selected" : ""} ${connection.connected !== true && !personal ? "disabled" : ""}>${t("حسابي الشخصي في OpenRouter", "My personal OpenRouter account")}</option>
+        </select></label>
+      <label>${personal ? t("النموذج ومزوّد الخدمة", "Model and provider") : t("نموذج Jobs لحزم التقديم والمحادثات", "Jobs model for application kits and chat")}
+        <select ${personal ? "data-personal-model" : "data-ai-writer-model"} ${unavailable ? "disabled" : ""}>${opts}</select></label></div>
+    <p class="account-note">${personal ? t("يتحمّل حسابك الشخصي تكلفة الطلب عند الضغط على زر الإنشاء، وفق إعدادات الفوترة لديك في OpenRouter.", "Your personal account pays when you choose Generate, according to your billing settings in OpenRouter.")
+      : t("تُحتسب الطلبات ضمن باقة Jobs. يستخدم مدرب السيرة وتخصيص الوظيفة من صفحة سيرتي نموذج DeepSeek.", "Writing requests use your Jobs plan. The résumé coach and the job selected on My résumé use DeepSeek.")}</p>
+    ${feedback ? `<p class="account-note" role="status">${esc(feedback)}</p>` : ""}
+    ${unavailable ? `<button class="btn outline" data-reload-ai-settings ${connection.refreshingPrefs ? "disabled" : ""}>${t("تحديث إعدادات الذكاء الاصطناعي", "Refresh AI settings")}</button>` : ""}
+    ${personal && connection.pause ? `<p class="account-note" role="status">${esc(personalErrorText(connection.pause, state.locale))}</p>
+      ${connection.connected === true && !unavailable ? `<button class="btn outline" data-retry-personal>${t("استئناف استخدام حسابي الشخصي", "Resume using my personal account")}</button>` : ""}` : ""}
+  </section>`;
 }
 
 function renderAiConnections() {
@@ -2100,29 +2130,114 @@ function renderAiConnections() {
   const connection = aiConnection();
   const messages = {
     connected: t("تم ربط حسابك في OpenRouter.", "Your OpenRouter account is connected."),
-    disconnected: t("تم فصل الحساب. توقفت الطلبات الشخصية.", "Disconnected. Personal requests are paused."),
+    disconnected: t("تم فصل حساب OpenRouter.", "Your OpenRouter account was disconnected."),
     cancelled: t("لم يكتمل الربط. يمكنك بدء الربط مجدداً.", "Connection was cancelled. You can start it again."),
     expired: t("انتهت مهلة الربط. ابدأ الربط مجدداً.", "The connection request expired. Start again."),
-    error: t("تعذّر إكمال الربط. يمكنك المحاولة مجدداً.", "Could not complete the connection. You can try again."),
+    error: t("تعذّر إكمال التغيير. يمكنك المحاولة مجدداً.", "The connection change could not be completed. You can try again."),
     unavailable: t("تعذّر التحقق من الاتصال. أعد المحاولة.", "Could not check the connection. Try again."),
     auth: t("انتهت جلسة الدخول. سجّل الدخول مجدداً.", "Your session ended. Sign in again."),
   };
-  return `<details class="section-block account-panel ai-connections" data-ai-connections ${connection.managerOpen ? "open" : ""}>
-    <summary>${t("حساب OpenRouter الشخصي", "Personal OpenRouter connection")}</summary>
-    <div class="account-disclosure-body">
-      <p class="account-note">${t("اربط حساب OpenRouter للسماح باستخدام رصيدك عند اختيارك له. ستوافق على الاتصال في موقع OpenRouter.", "Link OpenRouter to use your own credits when you choose them. You authorize the connection on OpenRouter.")}</p>
-      ${!connection.owner ? `<a class="btn outline" href="/login?next=%2Faccount">${t("تسجيل الدخول لربط حساب", "Sign in to connect an account")}</a>` : `
-      <p class="account-note" role="status" data-ai-connection-status>${connection.notice && messages[connection.notice] ? messages[connection.notice] : connection.loading ? t("جارٍ التحقق من الاتصال…", "Checking connection…") : connection.connected ? t("حسابك في OpenRouter متصل.", "Your OpenRouter account is connected.") : connection.connected === false ? t("لم يتم ربط حساب OpenRouter.", "OpenRouter is not connected.") : t("تحقّق من حالة الاتصال.", "Check the connection status.")}</p>
-      <div class="ai-funding-actions">
-        ${connection.connected === false || connection.pause === "OPENROUTER_RECONNECT_REQUIRED" ? `<button class="btn outline" type="button" data-connect-ai ${connection.busy ? "disabled" : ""}>${t("ربط حساب OpenRouter", "Connect OpenRouter")}</button>` : ""}
-        ${connection.connected === true && !connection.confirming ? `<button class="btn outline" type="button" data-disconnect-ai ${connection.busy ? "disabled" : ""}>${t("فصل حساب OpenRouter", "Disconnect OpenRouter")}</button>` : ""}
-        ${!connection.loading && (connection.connected === null || ["unavailable","error"].includes(connection.notice)) ? `<button class="btn outline" type="button" data-refresh-ai-status>${t("التحقق من الاتصال", "Check connection")}</button>` : ""}
-        ${connection.notice === "auth" ? `<a class="btn outline" href="/login?next=%2Faccount">${t("تسجيل الدخول", "Sign in")}</a>` : ""}
-      </div>
-      ${connection.confirming ? `<p>${t("هل تريد فصل OpenRouter عن Jobs؟ سيتطلب استخدام رصيدك الشخصي الربط من جديد.", "Disconnect OpenRouter from Jobs? Using your personal credits again will require reconnecting.")}</p><div class="ai-funding-actions">
-        <button class="btn outline" type="button" data-confirm-disconnect-ai ${connection.busy ? "disabled" : ""}>${t("تأكيد الفصل", "Confirm disconnect")}</button>
-        <button class="btn outline" type="button" data-keep-ai ${connection.busy ? "disabled" : ""}>${t("الإبقاء على الاتصال", "Keep connected")}</button></div>` : ""}`}
-    </div></details>`;
+  const status = connection.loading ? t("جارٍ التحقق…", "Checking…") : connection.connected === true ? t("متصل", "Connected")
+    : connection.connected === false ? t("غير متصل", "Not connected") : t("الحالة غير متوفرة", "Status unavailable");
+  return `<section class="profile-connection" aria-labelledby="personal-provider-title" data-ai-connections>
+    <div><h3 tabindex="-1" id="personal-provider-title">${t("حساب OpenRouter الشخصي", "Personal OpenRouter connection")}</h3>
+    <span role="status" data-ai-connection-status>${status}</span></div>
+    ${connection.notice && messages[connection.notice] ? `<p class="account-note" role="status">${messages[connection.notice]}</p>` : ""}
+    ${connection.connected === true && state.aiBillingSource === PERSONAL_SOURCE ? "" : `<p class="account-note">${connection.connected === true
+      ? t("اختر حساب OpenRouter أدناه إن أردت استخدامه لطلبات الكتابة.", "Choose your OpenRouter account below to use it for writing requests.")
+      : t("اربط حسابك لدى OpenRouter ثم اختره إذا أردت أن يتحمّل تكلفة طلباتك. هذا الخيار متاح في الباقتين المجانية والذهبية.", "Connect your OpenRouter account, then choose it below if you want it to pay for writing requests. This option is available on Free and Gold.")}</p>`}
+    <a class="profile-provider-link" href="https://openrouter.ai/integrations" target="_blank" rel="noopener noreferrer">${t("لديك مفتاح API من OpenAI أو مزوّد آخر؟ أدِر مفاتيح المزوّدين في OpenRouter.", "Already have an OpenAI or other provider API key? Manage provider keys in OpenRouter.")}</a>
+    <div class="ai-funding-actions">
+      ${connection.connected === false || connection.pause === "OPENROUTER_RECONNECT_REQUIRED" ? `<button class="btn outline" type="button" data-connect-ai ${connection.busy ? "disabled" : ""}>${t("ربط حساب OpenRouter", "Connect OpenRouter")}</button>` : ""}
+      ${connection.connected === true && !connection.confirming ? `<button class="btn outline" type="button" data-disconnect-ai ${connection.busy ? "disabled" : ""}>${t("فصل حساب OpenRouter", "Disconnect OpenRouter")}</button>` : ""}
+      ${!connection.loading && (connection.connected === null || ["unavailable","error"].includes(connection.notice)) ? `<button class="btn outline" type="button" data-refresh-ai-status>${t("التحقق من الاتصال", "Check connection")}</button>` : ""}
+      ${connection.notice === "auth" ? `<a class="btn outline" href="/login?next=%2Fprofile">${t("تسجيل الدخول", "Sign in")}</a>` : ""}
+    </div>
+    ${connection.confirming ? `<p>${t("هل تريد فصل OpenRouter عن Jobs؟ ستحتاج إلى ربط حسابك مجدداً لاستخدام رصيدك الشخصي.", "Disconnect OpenRouter from Jobs? Using your personal credits again will require reconnecting.")}</p>
+      <div class="ai-funding-actions"><button class="btn outline" type="button" data-confirm-disconnect-ai ${connection.busy ? "disabled" : ""}>${t("تأكيد الفصل", "Confirm disconnect")}</button>
+      <button class="btn outline" type="button" data-keep-ai ${connection.busy ? "disabled" : ""}>${t("الإبقاء على الاتصال", "Keep connected")}</button></div>` : ""}
+  </section>`;
+}
+
+async function loadProfilePlan(connection) {
+  connection.planStatus = "loading";
+  try {
+    const data = await apiJson("/api/subscriptions", { cache: "no-store" });
+    const plan = data.current?.effective_plan;
+    if (data.authenticated !== true || !["free","gold_monthly","gold_annual"].includes(plan)) throw Error();
+    connection.plan = plan;
+    connection.planStatus = "ready";
+  } catch {
+    connection.planStatus = "unavailable";
+  }
+  if (connection === aiConnection() && routeOf().name === "profile") render();
+}
+
+function renderProfile() {
+  const t = accountLabel;
+  const user = state.session?.user || {};
+  const connection = aiConnection();
+  const signedIn = Boolean(connection.owner);
+  if (signedIn && !connection.planStatus) void loadProfilePlan(connection);
+  if (signedIn && !connection.checked && !connection.loading) void checkAiConnection();
+  const plans = { free: t("المجانية", "Free"), gold_monthly: t("الذهبية الشهرية", "Monthly Gold"), gold_annual: t("الذهبية السنوية", "Annual Gold") };
+  shell(`${banner()}<div class="account-flow user-profile section" data-user-profile>
+    <header class="account-flow-heading"><h1>${t("الملف الشخصي", "User Profile")}</h1></header>
+    <section class="section-block account-block" data-profile-account><h2>${t("حسابي", "My account")}</h2>
+      ${signedIn ? `<dl class="profile-identity">
+        ${user.name ? `<div><dt>${t("الاسم", "Name")}</dt><dd dir="auto">${esc(user.name)}</dd></div>` : ""}
+        ${user.email ? `<div><dt>${t("البريد الإلكتروني", "Email")}</dt><dd><bdi>${esc(user.email)}</bdi></dd></div>` : ""}
+        </dl>` : `<p class="account-note">${t("سجّل الدخول لإدارة اشتراكك واتصالك الشخصي بالذكاء الاصطناعي.", "Sign in to manage your subscription and personal AI connection.")}</p>
+        <a class="btn primary" data-profile-signin href="/login?next=%2Fprofile">${t("تسجيل الدخول", "Sign in")}</a>`}
+    </section>
+    ${signedIn ? `${renderProfileSettings(connection)}
+      <section class="section-block account-block" data-profile-plan><h2>${t("اشتراكي", "My subscription")}</h2>
+      <p data-profile-plan-status role="status">${plans[connection.plan] || (connection.planStatus === "unavailable" ? t("تعذّر التحقق من الباقة الحالية.", "Current plan unavailable.") : t("جارٍ تحميل الباقة…", "Loading your plan…"))}</p>
+      <a class="btn outline" href="/pricing/">${t("إدارة الاشتراك والمدفوعات", "Manage subscription and payments")}</a></section>` : ""}
+    <section class="section-block account-block"><h2>${t("روابط الحساب", "Account links")}</h2>
+      <div class="account-links"><a data-profile-resume href="/account" data-nav="/account">${t("سيرتي الذاتية", "My résumé")}</a>
+      ${signedIn ? "" : `<a href="/pricing/">${t("باقات الاشتراك", "Subscription plans")}</a>`}
+      <a href="/terms" data-nav="/terms">${t("الشروط", "Terms")}</a><a href="/privacy" data-nav="/privacy">${t("الخصوصية", "Privacy")}</a></div>
+      ${signedIn ? `<button class="btn outline" data-auth-logout>${t("تسجيل الخروج", "Sign out")}</button>` : ""}
+    </section></div>`, { screen: "profile" });
+}
+
+async function refreshAiPreferences() {
+  const connection = aiConnection();
+  if (!connection.owner || connection.refreshingPrefs) return;
+  connection.refreshingPrefs = true;
+  render();
+  try {
+    if (!workspaceOwner) {
+      const drafts = state.profile || {};
+      const edits = new Set(drafts.resume_edited_fields || []);
+      if (drafts.resume_text?.trim()) { edits.add("resume_text"); edits.add("resume_filename"); }
+      await loadWorkspaceState();
+      if (workspaceOwner !== connection.owner) throw Error();
+      for (const key of edits) {
+        if (drafts[key] !== undefined) state.profile[key] = drafts[key];
+      }
+      if (edits.size) state.profile.resume_edited_fields = [...new Set([...(state.profile.resume_edited_fields || []), ...(drafts.resume_edited_fields || [])])];
+    } else {
+      const data = await apiJson("/api/me/state", { cache: "no-store" });
+      if (connection !== aiConnection() || !data.authenticated || !data.state || data.user?.sub && data.user.sub !== connection.owner) throw Error();
+      // Refresh only billing settings and their revisions. Keep any unsaved résumé and application edits intact.
+      state.aiBillingSource = data.state.aiBillingSource === PERSONAL_SOURCE ? PERSONAL_SOURCE : "jobs";
+      state.aiPersonalModel = PERSONAL_AI_MODELS.some(item => item.id === data.state.aiPersonalModel) ? data.state.aiPersonalModel : PERSONAL_AI_MODELS[0].id;
+      state.aiWriterModel = AI_WRITER_MODELS.some(item => item.id === data.state.aiWriterModel) ? data.state.aiWriterModel : "deepseek";
+      const revisions = { ...(state.__revisions || {}) };
+      for (const key of ["aiBillingSource", "aiPersonalModel", "aiWriterModel"]) revisions[key] = data.state.__revisions?.[key] || 0;
+      state.__revisions = revisions;
+    }
+    connection.choiceError = false;
+    connection.stalePreference = false;
+    if (state.aiBillingSource === PERSONAL_SOURCE) await checkAiConnection();
+  } catch {
+    connection.choiceError = true;
+  } finally {
+    connection.refreshingPrefs = false;
+    if (connection === aiConnection()) render();
+  }
 }
 
 async function checkAiConnection() {
@@ -2139,11 +2254,12 @@ async function checkAiConnection() {
     connection.notice = error.code === "AUTH_REQUIRED" ? "auth" : "unavailable";
   } finally {
     connection.loading = false;
+    connection.checked = true;
     if (aiConnection() === connection) {
       render();
       if (connection.focusManager) {
         connection.focusManager = false;
-        document.querySelector("[data-ai-connections] > summary")?.focus();
+        document.querySelector("#personal-provider-title")?.focus();
       }
     }
   }
@@ -2198,25 +2314,15 @@ async function saveAiChoice() {
 
 function bindAiFunding() {
   const connection = aiConnection();
-  const manage = document.querySelector("[data-ai-connections]");
-  manage?.addEventListener("toggle", () => {
-    if (!manage.isConnected || connection.managerOpen === manage.open) return;
-    connection.managerOpen = manage.open;
-    if (manage.open && connection.connected === null && !connection.loading) void checkAiConnection();
-  });
+  document.querySelector("[data-reload-ai-settings]")?.addEventListener("click", refreshAiPreferences);
   document.querySelector("[data-refresh-ai-status]")?.addEventListener("click", () => { connection.notice = ""; void checkAiConnection(); });
   document.querySelector("[data-connect-ai]")?.addEventListener("click", () => setAiConnection("connect"));
   document.querySelector("[data-disconnect-ai]")?.addEventListener("click", () => { connection.confirming = true; render(); document.querySelector("[data-keep-ai]")?.focus(); });
   document.querySelector("[data-keep-ai]")?.addEventListener("click", () => { connection.confirming = false; render(); document.querySelector("[data-disconnect-ai]")?.focus(); });
   document.querySelector("[data-confirm-disconnect-ai]")?.addEventListener("click", () => setAiConnection("disconnect"));
-  document.querySelector("[data-open-ai-connections]")?.addEventListener("click", () => {
-    connection.managerOpen = true;
-    navigate("/account");
-    document.querySelector("[data-ai-connections] > summary")?.focus();
-    void checkAiConnection();
-  });
   const update = source => {
-    if (!connection.owner || connection.owner !== workspaceOwner) return;
+    if (!connection.owner || connection.owner !== workspaceOwner || !["jobs", PERSONAL_SOURCE].includes(source)
+        || source === PERSONAL_SOURCE && connection.connected !== true || connection.stalePreference || connection.choiceError) return;
     state.aiBillingSource = source;
     void saveAiChoice();
     render();
@@ -2224,7 +2330,6 @@ function bindAiFunding() {
     if (source === PERSONAL_SOURCE) void checkAiConnection();
   };
   document.querySelector("[data-ai-payer]")?.addEventListener("change", e => update(e.target.value));
-  document.querySelector("[data-switch-ai-jobs]")?.addEventListener("click", () => update("jobs"));
   document.querySelector("[data-retry-personal]")?.addEventListener("click", () => {
     connection.pause = ""; connection.notice = ""; render(); void checkAiConnection();
   });
@@ -2241,6 +2346,10 @@ async function candidateAiRequest(path, body, selection) {
   try {
     result = await apiJson(path, { method: "POST", body: JSON.stringify({ ...body, ...selection }) });
   } catch (error) {
+    if (["AI_PREFERENCE_CHANGED", "AI_PREFERENCE_UNAVAILABLE"].includes(error.code)) {
+      connection.stalePreference = true;
+      throw error;
+    }
     const localValidation = ["RESUME_REQUIRED", "RESUME_UNREADABLE", "SOURCE_EVIDENCE_REQUIRED", "JOB_DETAILS_REQUIRED", "KIT_INCOMPLETE", "AUTH_REQUIRED"];
     if (selection.billing_source === PERSONAL_SOURCE && !localValidation.includes(error.code)) {
       connection.pause = error.code || "AI_UNAVAILABLE";
@@ -2261,6 +2370,10 @@ function sourceStatusLabel(ready, damaged) {
 }
 
 function renderAccount() {
+  if (deferredResumeOwner && deferredResumeOwner === accountId()) {
+    deferredResumeOwner = "";
+    void loadResumeFile().then(() => { if (routeOf().name === "account") render(); });
+  }
   void restoreRecentMatches();
   const p = { ...(state.profile || {}) };
   const ready = originalResumeReady(p);
@@ -2276,7 +2389,6 @@ function renderAccount() {
   const matchApproved = masterResumeReady();
   const preferencesOpen = document.querySelector("[data-search-preferences]")?.open;
   const originalOpen = document.querySelector("[data-review-original]")?.open;
-  const accountOpen = document.querySelector("[data-account-settings]")?.open;
   const fields = [
     ["target_roles", t("المسميات الوظيفية المستهدفة", "Target job titles")],
     ["target_locations", t("المدن أو الدول المستهدفة", "Target cities or countries")],
@@ -2349,25 +2461,7 @@ function renderAccount() {
           <button class="btn primary" data-save-profile>${iconCheck()} ${t("حفظ البيانات", "Save profile")}</button>
         </div>
       </details>
-      ${renderAiConnections()}
-      <details class="section-block account-panel" data-account-settings ${accountOpen ? "open" : ""}>
-        <summary>${t("الحساب والخصوصية", "Account and privacy")}</summary>
-        ${renderAuthPanel()}
-      </details>
     </div>`, { screen: "account" });
-}
-
-function renderAuthPanel() {
-  const t = accountLabel;
-  const user = state.session?.user || {};
-  return `<div class="account-disclosure-body">
-    ${state.session?.authenticated ? `<p dir="auto">${esc([user.name, user.email].filter(Boolean).join(" · "))}</p>
-      <button class="btn outline" data-auth-logout>${t("تسجيل الخروج", "Sign out")}</button>`
-      : `<a class="btn outline" href="/login" data-nav="/login">${t("تسجيل الدخول", "Sign in")}</a>`}
-    <div class="account-links"><a href="/pricing/?lang=${state.locale === "en" ? "en" : "ar"}">${t("الاشتراك وسجل المدفوعات", "Subscription and payment history")}</a>
-      <a href="/terms" data-nav="/terms">${t("الشروط", "Terms")}</a>
-      <a href="/privacy" data-nav="/privacy">${t("الخصوصية", "Privacy")}</a></div>
-  </div>`;
 }
 
 function resumeRecoveryMessage() {
@@ -2405,7 +2499,7 @@ function renderResumeCoach() {
     </div>
     <p class="account-note">${t("أنشئ سيرة عربية وإنجليزية من خبراتك أو خصّصها لإعلان وظيفة.", "Generate a résumé in Arabic and English from your experience, or tailor it to a specific vacancy.")}</p>
     ${signedIn ? "" : `<a class="account-login" href="/login" data-nav="/login">${t("سجّل الدخول لاستخدام المدرب", "Sign in to use the coach")}</a>`}
-    ${aiActionOptions("coach", true, "deepseek")}
+    ${aiActionOptions("coach", "deepseek")}
     <button class="btn primary" data-resume-coach ${ready && signedIn && !pending && !aiBlocked() ? "" : "disabled"}>${iconSpark()} ${pending ? t("جارٍ تحسين السيرة…", "Improving résumé…") : t("تحسين السيرة الكاملة", "Improve my full résumé")}</button>
     ${state.action.context === "resume-coach" || state.action.pending === "resume-coach" ? banner() : ""}
     ${coach ? `<div class="account-drafts" data-coach-draft>
@@ -2432,7 +2526,7 @@ function renderResumeCoach() {
         <div class="field"><label for="coach-target-job">${t("اختر وظيفة", "Select a vacancy")}</label>
           <select id="coach-target-job" name="job" required>${targetJobOptions(jobs, selected)}</select>
         </div>
-        ${aiActionOptions("target", false, "deepseek")}
+        ${aiActionOptions("target", "deepseek")}
         <button class="btn outline" type="submit" ${ready && signedIn && !state.jobWriterPending && !aiBlocked() ? "" : "disabled"}>${iconSpark()} ${t("إنشاء سيرة لهذه الوظيفة", "Generate résumé for this job")}</button>
       </form>
       <button class="btn outline" data-find-coach-job data-nav="/jobs" ${jobs.length ? "hidden" : ""}>${t("اختيار وظيفة لتخصيص السيرة", "Choose a job to tailor my résumé")}</button>
@@ -2442,6 +2536,9 @@ function renderResumeCoach() {
 
 function resumeCoachError(code) {
   const t = accountLabel;
+  if (["AI_PREFERENCE_CHANGED", "AI_PREFERENCE_UNAVAILABLE"].includes(code)) {
+    return t("تعذّر تأكيد تفضيل الدفع. حدّث إعدادات الذكاء الاصطناعي في الملف الشخصي ثم أعد المحاولة.", "Your billing choice could not be confirmed. Refresh AI settings in User Profile, then retry.");
+  }
   if (code === "PERSONAL_REQUEST_PAUSED") return personalErrorText(aiConnection().pause, state.locale);
   if (code === "AI_SELECTION_PAUSED") return t("راجع اتصالك ومصدر الرصيد قبل المحاولة.", "Review your connection and selected credits before retrying.");
   switch (code) {
@@ -2497,7 +2594,7 @@ function renderLegal(page) {
   shell(
     `${banner()}
     <section class="section" style="padding-top:14px">
-      <button class="btn ghost sm" data-nav="/account">${iconBack()} ${en ? "Back" : "رجوع"}</button>
+      <a class="btn ghost sm" href="/profile" data-nav="/profile">${iconBack()} ${en ? "User profile" : "الملف الشخصي"}</a>
       <div class="section-block legal-panel">
         <h1>${title}</h1>
         <div class="list-rows">
@@ -2505,7 +2602,7 @@ function renderLegal(page) {
         </div>
       </div>
     </section>`,
-    { screen: "account" },
+    { screen: "profile" },
   );
 }
 
@@ -2716,6 +2813,11 @@ function setupEvents() {
   if (localeToggle) {
     localeToggle.addEventListener("click", () => {
       state.locale = state.locale === "en" ? "ar" : "en";
+      const url = new URL(location.href);
+      if (url.searchParams.has("lang")) {
+        url.searchParams.set("lang", state.locale);
+        history.replaceState(history.state, "", url.pathname + url.search + url.hash);
+      }
       savePreferences();
       render();
       document.querySelector("[data-toggle-locale]")?.focus({ preventScroll: true });
@@ -3391,7 +3493,7 @@ function setupEvents() {
       clearTimeout(saveWorkspaceTimer);
       state.session = { authenticated: false, user: null };
       root.replaceChildren();
-      location.replace("/account");
+      location.replace("/profile");
     });
   }
 
@@ -3730,6 +3832,7 @@ function render() {
   if (r.name === "jobs-list") return renderJobsList();
   if (r.name === "settings") return renderSettings();
   if (r.name === "account") return renderAccount();
+  if (r.name === "profile") return renderProfile();
   if (r.name === "login") return renderLogin();
   if (r.name === "onboarding") return renderOnboarding();
   if (r.name === "legal") return renderLegal(r.page);
@@ -3785,26 +3888,28 @@ async function init() {
   }
   await loadWorkspaceState();
   if (!AI_WRITER_MODELS.some(model => model.id === state.aiWriterModel)) state.aiWriterModel = "deepseek";
-  if (accountId()) {
-    const url = new URL(location.href);
-    const outcome = url.pathname.replace(/\/$/, "") === "/account" ? url.searchParams.get("openrouter") : "";
-    const connection = aiConnection();
-    if (["connected", "cancelled", "expired", "error"].includes(outcome)) {
-      connection.managerOpen = true;
+  const returnUrl = new URL(location.href);
+  const isProviderReturn = ["/account", "/profile"].includes(returnUrl.pathname.replace(/\/$/, "")) && returnUrl.searchParams.has("openrouter");
+  if (isProviderReturn) {
+    const outcome = returnUrl.searchParams.get("openrouter");
+    returnUrl.pathname = "/profile";
+    returnUrl.searchParams.delete("openrouter");
+    history.replaceState(history.state, "", returnUrl.pathname + returnUrl.search + returnUrl.hash);
+    if (accountId() && ["connected", "cancelled", "expired", "error"].includes(outcome)) {
+      const connection = aiConnection();
       connection.focusManager = true;
       connection.notice = outcome === "connected" ? "" : outcome;
-      url.searchParams.delete("openrouter");
-      history.replaceState(history.state, "", url.pathname + url.search + url.hash);
     }
-    if (connection.managerOpen || state.aiBillingSource === PERSONAL_SOURCE) void checkAiConnection();
   }
-  await loadResumeFile();
+  if (accountId() && (aiConnection().focusManager || state.aiBillingSource === PERSONAL_SOURCE)) void checkAiConnection();
+  const profileEntry = routeOf().name === "profile";
+  if (profileEntry) deferredResumeOwner = accountId(); else await loadResumeFile();
   const catalog = (await centralSources)?.sources;
   if (Array.isArray(catalog)) {
     const centralIds = new Set(catalog.map((source) => source.id));
     state.sources = [...state.sources.filter((source) => !centralIds.has(source.id)), ...catalog];
   }
-  if (state.session?.authenticated) {
+  if (state.session?.authenticated && !profileEntry) {
     try { state.aiHealth = await apiJson("/api/ai-health"); } catch { state.aiHealth = { ready: false, providers: {} }; }
   }
   state.profile = sanitizeLegacyProfile(state.profile || {});

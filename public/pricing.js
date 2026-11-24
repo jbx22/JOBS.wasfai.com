@@ -6,7 +6,7 @@ const catalog = [
 ];
 const copy = {
   free: ["المجانية", "Free"], gold_monthly: ["الذهبية الشهرية", "Monthly Gold"], gold_annual: ["الذهبية السنوية", "Annual Gold"],
-  title: ["باقات الاشتراك", "Subscription plans"], account: ["حسابي", "My account"], app: ["فتح التطبيق", "Open app"],
+  title: ["باقات الاشتراك", "Subscription plans"], account: ["حسابي", "My account"], profile: ["الملف الشخصي", "User profile"], app: ["فتح التطبيق", "Open app"],
   signin: ["تسجيل الدخول", "Sign in"], intro: ["قارن مدد الاشتراك وحدود الاستخدام، ثم اختر الباقة التي تناسبك.", "Compare payment terms and usage allowances, then choose your plan."],
   current: ["باقتك الحالية", "Your current plan"], end: ["نهاية الفترة المدفوعة", "Paid term ends"],
   currentFree: ["تستخدم الباقة المجانية.", "You have Free access."],
@@ -190,7 +190,7 @@ function render() {
   root.innerHTML = `<header class="pricing-top">
     <a class="brand" href="/app"><img src="/brand-logo-192.png" width="36" height="36" alt=""><strong>JOBS.wasfai.com</strong></a>
     <nav aria-label="${t("account")}"><button class="text-link" data-toggle-locale lang="${state.locale === "ar" ? "en" : "ar"}">${state.locale === "ar" ? "English" : "العربية"}</button>
-    ${state.authenticated ? `<a href="/account">${t("account")}</a>` : `<a data-pricing-signin href="${esc(signin())}">${t("signin")}</a>`}</nav>
+    ${state.authenticated ? `<a href="/profile?lang=${state.locale}">${t("profile")}</a>` : `<a data-pricing-signin href="${esc(signin())}">${t("signin")}</a>`}</nav>
   </header>
   <section class="hero"><h1>${t("title")}</h1><p>${t("intro")}</p></section>
   ${state.authenticated && state.live ? `<section class="panel current" data-current-plan><div><h2>${t("current")}</h2><strong>${t(plan)}</strong></div>

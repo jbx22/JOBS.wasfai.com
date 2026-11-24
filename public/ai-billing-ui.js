@@ -18,8 +18,8 @@ export function aiDisclosure(locale, source, model, jobsModel, task) {
     const personal = PERSONAL_AI_MODELS.find(item => item.id === model);
     if (!personal) return en ? "Choose a personal model before continuing." : "اختر نموذجاً لحسابك الشخصي قبل المتابعة.";
     summary = en
-      ? `Your OpenRouter credits pay for this request. OpenRouter sends ${info} to ${personal.host} to run ${personal.label}.`
-      : `تُحتسب تكلفة هذا الطلب من رصيدك في OpenRouter. يرسل OpenRouter ${info} إلى ${personal.host} لتشغيل ${personal.label}.`;
+      ? `Your personal account pays through your OpenRouter credits or provider billing settings. OpenRouter sends ${info} to ${personal.host} to run ${personal.label}.`
+      : `يتحمّل حسابك الشخصي تكلفة الطلب عبر رصيد OpenRouter أو إعدادات فوترة المزوّد. يرسل OpenRouter ${info} إلى ${personal.host} لتشغيل ${personal.label}.`;
   } else {
     const route = jobsModel === "minimax-m3" ? "OpenRouter · MiniMax M3" : jobsModel === "glm-5.2" ? "OpenRouter · GLM 5.2" : "DeepSeek";
     summary = en
