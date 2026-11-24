@@ -18,9 +18,9 @@ const software = { ...records[0], id: "fixture-software", public_id: "i-fixture-
 const stale = { id: "demo-old", title: "Legacy Rust Example", employer: "Legacy Example", source: "resume-match", score: 99, match_eligible: true, status: "ready" };
 const saved = { id: "kept-by-applicant", title: "Previously saved logistics role", employer: "Example Logistics", source: "manual", imported: true, status: "discovered" };
 
-async function workspace(page, authenticated = true, initialProfile = profile, catalogRows = records) {
+async function workspace(page, authenticated = true, initialProfile = profile, catalogRows = records, initialJobs = [stale, saved]) {
   const trace = { browse: [], match: [], details: [], saves: [], errors: [], unexpected: [], failNextMatch: false };
-  let state = { jobs: [stale, saved], profile: initialProfile, packages: [], approvedMasterResume: false };
+  let state = { jobs: initialJobs, profile: initialProfile, packages: [], approvedMasterResume: false };
   page.on("pageerror", error => trace.errors.push(error.message));
   await page.route("**/*", async route => {
     const req = route.request();
@@ -36,6 +36,10 @@ async function workspace(page, authenticated = true, initialProfile = profile, c
       case "/api/sources": return send({ sources: [] });
       case "/api/me/state":
         if (req.method() === "PUT") {
+          if (trace.failNextSave) {
+            trace.failNextSave = false;
+            return send({ code: "SAVE_UNAVAILABLE" }, 503);
+          }
           state = req.postDataJSON().state;
           trace.saves.push(state);
         }
@@ -55,7 +59,9 @@ async function workspace(page, authenticated = true, initialProfile = profile, c
           return send({ ok: false, code: "MATCH_UNAVAILABLE" }, 503);
         }
         const catalog = matching ? catalogRows.map(row => ({ ...row, match_eligible: true, score: 87, match_evidence: ["Preventive maintenance"] })) : [...catalogRows, software];
-        const filtered = catalog.filter(row => row.title.toLowerCase().includes((filters.q || "").toLowerCase()) && row.location.includes(filters.city || ""));
+        const filtered = catalog.filter(row => (!filters.id ||
+          (row.public_id === (filters.kind === "employer" ? "e-" : "i-") + filters.id)) &&
+          row.title.toLowerCase().includes((filters.q || "").toLowerCase()) && row.location.includes(filters.city || ""));
         const offset = Number(input.offset);
         const limit = Number(input.limit);
         const jobs = filtered.slice(offset, offset + limit);
@@ -176,6 +182,83 @@ test("the jobs entry starts with résumé matches and remembers a deliberate swi
   expect(trace.match).toHaveLength(1);
 });
 
+test("mobile guest returns from sign-in to the same verified vacancy and recovers when it closes", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const guest = await workspace(page, false);
+  await page.goto("/jobs?view=browse");
+  const card = page.locator(".job-search-card").first();
+  await expect(card.locator("a.btn.primary")).toHaveAttribute("href", records[0].public_url);
+  await card.locator("[data-open-search-job]").click();
+  const returnTo = "/jobs?view=browse&vacancy=" + records[0].public_id;
+  await expect(page).toHaveURL(/\/login\?next=/);
+  await page.locator("[data-terms-consent]").check();
+  expect(new URL(await page.locator("[data-google-login]").getAttribute("href"), page.url()).searchParams.get("next")).toBe(returnTo);
+  expect(guest.saves).toEqual([]);
+  await page.unroute("**/*");
+  const signed = await workspace(page);
+  await page.goto(returnTo);
+  await expect(page.locator(".job-search-card")).toHaveCount(1);
+  expect(signed.browse.at(-1)).toMatchObject({ id: records[0].id, kind: "ingested" });
+  await expect(page.locator(".job-search-card")).toContainText(records[0].title);
+  expect(signed.saves).toEqual([]);
+  await page.goto("/jobs?view=browse&vacancy=i-closed-vacancy");
+  await expect(page.locator(".empty")).toContainText(/لم يعد|no longer/);
+  await page.locator(".empty a").click();
+  await expect(page.locator(".job-search-card")).toHaveCount(20);
+});
+
+test("mobile save failure can be retried and an employer handoff leaves the tracker untouched", async ({ page }) => {
+  await page.setViewportSize({ width: 360, height: 800 });
+  const trace = await workspace(page);
+  trace.failNextSave = true;
+  await page.goto("/jobs?view=matches");
+  const first = page.locator(".job-search-card").first();
+  const save = first.locator("[data-open-search-job]");
+  await save.click();
+  await expect(page.getByRole("alert")).toContainText(/تعذّر حفظ|save this vacancy/);
+  await expect(page).toHaveURL(/view=matches/);
+  await save.click();
+  await expect(page).toHaveURL(/\/jobs\/live-fixture-mechanical-01$/);
+  await expect(page.locator(".banner.ok")).toContainText(/حُفظت|saved/);
+  await expect(page.locator("[data-vacancy-apply]")).toHaveAttribute("href", records[0].source_url);
+  await expect(page.locator("[data-vacancy-apply]")).toHaveAttribute("target", "_blank");
+  await expect(page.locator("[data-ghostwriter]")).toHaveCount(1);
+  await page.locator('[data-tab="tracking"]').click();
+  await expect(page.locator("[data-submit-action]")).toBeHidden();
+  await page.locator(".job-record-confirm summary").click();
+  await expect(page.locator("[data-submit-action]")).toBeVisible();
+  expect(trace.saves.at(-1).jobs.find(job => job.public_id === records[0].public_id).status).toBe("discovered");
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await page.locator(".job-back").click();
+  await expect(page).toHaveURL(/view=matches/);
+});
+
+test("320px search navigation and linked tracking are usable in both languages", async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 658 });
+  await workspace(page);
+  for (const locale of ["ar", "en"]) {
+    await page.goto("/jobs?view=browse");
+    await page.evaluate(lang => localStorage.setItem("jobs.wasfai.preferences", JSON.stringify({ version: 2, locale: lang, theme: "dark" })), locale);
+    await page.reload();
+    await expect(page.locator("[data-search-tab]")).toHaveCount(3);
+    for (const pill of await page.locator("[data-search-tab]").all()) {
+      const box = await pill.boundingBox();
+      expect(box.x).toBeGreaterThanOrEqual(0);
+      expect(box.x + box.width).toBeLessThanOrEqual(320);
+    }
+    await page.goto("/jobs/" + saved.id + "?tab=tracking");
+    const active = page.locator('[data-tab="tracking"]');
+    await expect(active).toHaveAttribute("aria-pressed", "true");
+    await expect(page.locator("[data-application-field=notes]")).toBeVisible();
+    await page.locator('[data-tab="overview"]').click();
+    await expect(page).toHaveURL(/tab=overview/);
+    await page.reload();
+    await expect(page.locator('[data-tab="overview"]')).toHaveAttribute("aria-pressed", "true");
+    expect(await page.locator(".job-back svg").evaluate(el => el.getBoundingClientRect().height)).toBeLessThanOrEqual(20);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= 320)).toBe(true);
+  }
+});
+
 test("a selected SmartRecruiters vacancy loads official requirements by public ID once", async ({ page }) => {
   const id = "ksa-aecom2-smartrecruiters-1234";
   const selected = { ...records[0], id, public_id: "i-" + id, source_id: "ksa-aecom2-smartrecruiters",
@@ -214,4 +297,48 @@ test("missing role opens the editable target, and damaged source still allows pu
   await page.locator(".empty [data-nav='/jobs?view=browse']").click();
   await expect(page.locator(".job-search-card")).toHaveCount(20);
   expect(corrupted.match).toEqual([]);
+});
+
+
+test("mobile home keeps the guest search above navigation and restores the query on Back", async ({ page }) => {
+  await page.setViewportSize({ width: 360, height: 740 });
+  await workspace(page, false);
+  await page.goto("/app");
+  const home = page.locator(".job-home");
+  const submit = home.locator(".primary");
+  await expect(submit).toHaveText("بحث عن وظائف");
+  await expect(home.locator("[data-search-approved-jobs]")).toHaveCount(0);
+  await expect(submit).toBeInViewport({ ratio: 1 });
+  const searchBox = await submit.boundingBox();
+  const navBox = await page.locator(".bottom-nav").boundingBox();
+  expect(searchBox.y + searchBox.height).toBeLessThan(navBox.y);
+  await home.getByRole("textbox").nth(0).fill("Mechanical");
+  await home.getByRole("textbox").nth(1).fill("Jubail");
+  await page.locator("[data-toggle-locale]").click();
+  await expect(home.getByRole("heading")).toHaveText("Find a job in Saudi Arabia");
+  await expect(home.getByRole("textbox").nth(0)).toHaveValue("Mechanical");
+  await submit.click();
+  await expect(page).toHaveURL(/view=browse.*q=Mechanical.*city=Jubail/);
+  await page.goBack();
+  await expect(home.getByRole("textbox").nth(1)).toHaveValue("Jubail");
+});
+
+test("mobile home promotes one next action for a ready résumé or existing saved work", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await workspace(page, true, profile, records, [stale]);
+  await page.goto("/app");
+  const home = page.locator(".job-home");
+  await expect(home.locator(".primary")).toHaveAttribute("data-search-approved-jobs", "");
+  await expect(home.locator(".home-next")).toContainText(profile.target_roles);
+  await expect(home.locator(".primary")).toBeInViewport({ ratio: 1 });
+  await page.unroute("**/*");
+  await workspace(page);
+  await page.goto("/app");
+  await expect(home.locator(".primary")).toHaveAttribute("href", "/jobs/" + saved.id);
+  await expect(home.locator(".home-next")).toContainText(saved.title);
+  await expect(home.locator("[data-search-approved-jobs]")).toBeVisible();
+  await expect(home.locator(".primary")).toBeInViewport({ ratio: 1 });
+  await home.locator(".primary").click();
+  await expect(page).toHaveURL(new RegExp("/jobs/" + saved.id + "$"));
+  await expect(page.locator("main")).toContainText(saved.title);
 });

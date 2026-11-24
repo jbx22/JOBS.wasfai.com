@@ -53,7 +53,7 @@ test("guest users can track an application and schedule a follow-up", async ({ p
     }
   }, id);
   await page.goto(`/jobs/${id}`, { waitUntil: "networkidle" });
-  await page.locator('[data-tab="resume"]').click();
+  await page.locator('[data-tab="tracking"]').click();
   await page.locator('[data-application-field="applied_at"][data-job-id="tracking-example"]').fill("2026-07-14");
   await page.locator('[data-application-field="follow_up_at"][data-job-id="tracking-example"]').fill("2026-07-21");
   await page.locator('[data-application-field="recruiter_name"][data-job-id="tracking-example"]').fill("Recruitment Team");

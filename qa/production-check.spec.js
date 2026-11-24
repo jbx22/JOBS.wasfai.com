@@ -74,12 +74,10 @@ test("production mobile and desktop screenshots render without console errors", 
   await page.goto(`${BASE_URL}/app`, { waitUntil: "networkidle" });
   await expect(page.locator("html")).toHaveAttribute("lang", "ar");
   await expect(page.locator("html")).toHaveAttribute("dir", "rtl");
-  await expect(page.locator("body")).toContainText("أكمل الملف");
-  await page.locator("[data-user-menu]").click();
+  await expect(page.locator("#home-search-title")).toHaveText("ابحث عن وظيفة في السعودية");
   await page.locator("[data-toggle-locale]").click();
   await expect(page.locator("html")).toHaveAttribute("lang", "en");
-  await expect(page.locator("body")).toContainText("Complete Profile");
-  await page.locator("[data-user-menu]").click();
+  await expect(page.locator("#home-search-title")).toHaveText("Find a job in Saudi Arabia");
   await page.locator("[data-toggle-theme]").click();
   await expect(page.locator("body")).toHaveAttribute("data-theme", "dark");
   await expect(page.locator(".bottom-nav")).toBeVisible();
@@ -90,7 +88,7 @@ test("production mobile and desktop screenshots render without console errors", 
 
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto(`${BASE_URL}/app`, { waitUntil: "networkidle" });
-  await expect(page.locator("body")).toContainText("Four steps");
+  await expect(page.locator(".job-home .primary")).toHaveText("Search jobs");
   await testInfo.attach("desktop-home", {
     body: await page.screenshot({ fullPage: true }),
     contentType: "image/png",
@@ -127,7 +125,7 @@ test("production login, compact header menu, and onboarding wiring are present",
   const menuBox = await page.locator("[data-user-menu-panel]").boundingBox();
   expect(menuBox.x).toBeGreaterThanOrEqual(0);
   expect(menuBox.x + menuBox.width).toBeLessThanOrEqual(390);
-  const menuIconBox = await page.locator("[data-user-menu-panel] svg").boundingBox();
+  const menuIconBox = await page.locator("[data-user-menu-panel] svg").first().boundingBox();
   expect(menuIconBox.width).toBeLessThanOrEqual(24);
 
   await page.goto(`${BASE_URL}/login`, { waitUntil: "networkidle" });

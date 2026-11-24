@@ -292,3 +292,7 @@
 
 - Recover unreadable résumé uploads, strengthen DeepSeek coaching and guide applicants to relevant vacancies
 
+## jobs78 — 2026-11-24 14:00
+
+- Simplify the mobile résumé, search and job application workflows
+

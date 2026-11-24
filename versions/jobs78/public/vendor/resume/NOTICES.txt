@@ -1,0 +1,12 @@
+These pinned browser distributions are loaded on demand for local résumé parsing.
+
+PDF.js 4.10.38 is from pdfjs-dist, https://github.com/mozilla/pdf.js, Apache-2.0.
+JSZip 3.10.1 is from jszip, https://github.com/Stuk/jszip, used under MIT.
+Tesseract.js 5.1.1 and Tesseract.js Core 5.1.1 are from https://github.com/naptha,
+Apache-2.0. The core is the non-SIMD, LSTM-only distribution for browser compatibility.
+Per-package copyright and license notices are included alongside the scripts.
+
+Arabic and English integer language models come from the 4.0.0_best_int directory
+in @tesseract.js-data/ara@1.0.0 and @tesseract.js-data/eng@1.0.0. The underlying
+Tesseract traineddata is Apache-2.0 (https://github.com/tesseract-ocr/tessdata_best).
+See ocr-5.1.1/CORE-LICENSE.txt for the Apache-2.0 terms.
