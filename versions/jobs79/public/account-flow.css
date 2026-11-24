@@ -1,0 +1,218 @@
+.account-flow {
+  display: grid;
+  gap: 14px;
+  min-inline-size: 0;
+}
+
+.account-flow * {
+  min-inline-size: 0;
+}
+
+.account-flow h1,
+.account-flow h2,
+.account-flow h3,
+.account-flow p {
+  margin: 0;
+}
+
+.account-flow-heading h1 {
+  color: var(--ink);
+  font-size: clamp(1.4rem, 1.15rem + .9vw, 1.9rem);
+}
+
+.account-flow .account-block,
+.account-flow .account-panel {
+  grid-template-columns: minmax(0, 1fr);
+  padding: clamp(14px, 2vw, 20px);
+}
+
+.account-flow .account-block {
+  gap: 12px;
+}
+
+.account-flow .account-block h2,
+.account-flow .account-panel > summary {
+  color: var(--ink);
+  font-size: 1.05rem;
+  font-weight: 750;
+  line-height: 1.5;
+}
+
+.account-section-head,
+.account-saved-file,
+.account-actions,
+.account-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  align-items: center;
+}
+
+.account-section-head,
+.account-saved-file {
+  justify-content: space-between;
+}
+
+.account-flow .badge,
+.account-flow .btn {
+  max-inline-size: 100%;
+  white-space: normal;
+  block-size: auto;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.account-flow .badge {
+  padding-block: 4px;
+}
+
+.account-flow .btn {
+  min-block-size: 44px;
+  padding-block: 8px;
+  justify-self: start;
+  text-align: center;
+}
+
+.account-flow .btn svg {
+  flex: none;
+}
+
+.account-flow .btn:disabled,
+.account-flow .account-file:has(input:disabled) {
+  opacity: .65;
+  cursor: default;
+}
+
+.account-file {
+  position: relative;
+  cursor: pointer;
+}
+
+.account-file input {
+  position: absolute;
+  inline-size: 1px;
+  block-size: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+}
+
+.account-flow :is(a, button, summary):focus-visible,
+.account-flow .account-file:focus-within {
+  outline: 3px solid var(--teal);
+  outline-offset: 3px;
+}
+
+.account-note,
+.account-saved-file,
+.account-notice {
+  color: var(--ink-2);
+  font-size: .875rem;
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+}
+
+.account-notice,
+.account-saved-file {
+  padding: 9px 12px;
+  border-inline-start: 3px solid var(--line-strong);
+  background: var(--surface-2);
+}
+
+.account-notice {
+  border-color: var(--gold);
+}
+
+.account-flow summary {
+  display: list-item;
+  align-content: center;
+  min-block-size: 44px;
+  padding-block: 9px;
+  color: var(--ink-2);
+  cursor: pointer;
+  font-weight: 650;
+}
+
+.account-flow .account-disclosure {
+  border-block-start: 1px solid var(--line);
+}
+
+.account-flow .account-panel {
+  display: block;
+  padding-block: 4px;
+}
+
+.account-disclosure-body,
+.account-drafts,
+.account-tailoring {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+}
+
+.account-disclosure-body {
+  padding-block: 4px 12px;
+}
+
+.account-drafts,
+.account-tailoring {
+  padding-block-start: 10px;
+  border-block-start: 1px solid var(--line);
+}
+
+.account-flow .form,
+.account-flow .form .field {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.account-flow .form .field label {
+  font-size: .825rem;
+}
+
+.account-flow .form .field :is(input, select, textarea),
+.account-flow .document-editor {
+  inline-size: 100%;
+  max-inline-size: 100%;
+  min-block-size: 44px;
+  font-size: 1rem;
+}
+
+.account-flow :is(.document-editor, .resume-editor) {
+  min-block-size: 10rem;
+  line-height: 1.65;
+}
+
+.account-flow .document-editor {
+  min-block-size: 14rem;
+}
+
+.account-flow .resume-coach.approved {
+  background: var(--surface);
+}
+
+.account-login,
+.account-links a {
+  display: inline-flex;
+  align-items: center;
+  justify-self: start;
+  min-block-size: 44px;
+  color: var(--ink-2);
+  text-decoration: underline;
+}
+
+.account-flow [hidden] {
+  display: none;
+}
+
+@media (min-width: 740px) {
+  .account-flow .account-fields {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 480px) {
+  .account-flow .account-block > .btn,
+  .account-flow .account-tailoring .btn,
+  .account-flow .account-drafts > .btn {
+    inline-size: 100%;
+  }
+}

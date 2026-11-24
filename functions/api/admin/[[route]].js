@@ -1,11 +1,11 @@
 import { adminJson, audit, auditStatement, ensureAdminSchema, requireAdmin, SERVICE_ADMIN_EMAIL, SUPER_ADMIN_EMAIL } from "../_admin.js";
-import { adminWorkspace } from "../_admin_workspaces.js";
+import { adminWorkspace, paymentTotals } from "../_admin_workspaces.js";
 import { guardedUserBatch, isWriteConflict } from "../_db.js";
 import { DEEPSEEK_LABEL, deepseekModel } from "../_deepseek.js";
 import { moyasarInvoiceRecord, moyasarStatus } from "../_moyasar.js";
 import { ensureWorkspaceSchema, noContent } from "../_state.js";
 import { AuthError } from "../auth/_auth.js";
-import { ensureSubscriptionSchema, planById, publicPlans } from "../_subscriptions.js";
+import { FREE_MONTHLY_AI_BUDGET_USD, effectiveSubscription, ensureSubscriptionSchema, nextPeriodEnd, planById, publicPlans, readSubscriptionRecord, subscriptionSnapshot } from "../_subscriptions.js";
 import { reconcileMoyasarPayment } from "../payments/moyasar/_shared.js";
 
 export async function onRequest(context) {
@@ -53,7 +53,9 @@ async function overview(context) {
   await ensureUserTable(access.db);
   const users = await count(access.db, "users");
   const activeUsers = await scalar(access.db, "SELECT COUNT(*) AS value FROM users WHERE account_status = 'active'");
-  const subscribers = await scalar(access.db, "SELECT COUNT(*) AS value FROM subscriptions WHERE status IN ('active','trial')");
+  const subscriberCount = await access.db.prepare(`SELECT COUNT(*) AS n FROM subscriptions WHERE status IN ('active','trial')
+    AND (plan='free' OR substr(current_period_end,1,10)>?)`).bind(new Date().toISOString().slice(0, 10)).first();
+  const subscribers = Number(subscriberCount?.n || 0);
   const adminsCount = await scalar(access.db, "SELECT COUNT(*) AS value FROM admin_memberships WHERE status = 'active'");
   await ensureWorkspaceSchema(access.db);
   const applications = await count(access.db, "applications");
@@ -84,14 +86,14 @@ async function users(context) {
     SELECT u.id, u.email, u.display_name, u.provider, u.account_status, u.created_at, u.last_login_at,
       u.accepted_terms_at, u.onboarding_completed_at,
       COALESCE(s.plan, 'free') AS plan, COALESCE(s.status, 'trial') AS subscription_status,
-      COALESCE(s.ai_monthly_limit_usd, 5) AS ai_monthly_limit_usd
+      COALESCE(s.ai_monthly_limit_usd, ${FREE_MONTHLY_AI_BUDGET_USD}) AS ai_monthly_limit_usd, s.current_period_end
     FROM users u
     LEFT JOIN subscriptions s ON s.user_id = u.id
     ${where}
     ORDER BY u.last_login_at DESC, u.id
     LIMIT 101 OFFSET ?
   `).bind(...bindings, offset).all();
-  return adminJson({ users: results.slice(0, 100), next_offset: results.length > 100 ? offset + 100 : null });
+  return adminJson({ users: results.slice(0, 100).map(withSubscriptionStatus), next_offset: results.length > 100 ? offset + 100 : null });
 }
 
 async function updateUser(context, id) {
@@ -121,7 +123,7 @@ async function subscribers(context) {
   const { results = [] } = await access.db.prepare(`
     SELECT u.id, u.email, u.display_name, u.account_status,
       COALESCE(s.plan, 'free') AS plan, COALESCE(s.status, 'trial') AS subscription_status,
-      COALESCE(s.ai_monthly_limit_usd, 5) AS ai_monthly_limit_usd,
+      COALESCE(s.ai_monthly_limit_usd, ${FREE_MONTHLY_AI_BUDGET_USD}) AS ai_monthly_limit_usd,
       s.current_period_end, s.updated_at,
       COALESCE(SUM(a.cost_usd), 0) AS ai_cost_usd,
       COALESCE(SUM(a.input_tokens + a.output_tokens), 0) AS ai_tokens
@@ -133,7 +135,12 @@ async function subscribers(context) {
     ORDER BY ai_cost_usd DESC, u.last_login_at DESC
     LIMIT 100
   `).all();
-  return adminJson({ subscribers: results });
+  return adminJson({ subscribers: results.map(withSubscriptionStatus) });
+}
+
+function withSubscriptionStatus(row) {
+  const effective = effectiveSubscription({ ...row, status: row.subscription_status });
+  return { ...row, effective_status: effective.status, effective_plan: effective.effective_plan, paid_active: effective.paid_active };
 }
 
 async function plans(context) {
@@ -194,24 +201,25 @@ async function activatePayment(context, id) {
   const row = await access.db.prepare("SELECT id, user_id, plan, status, provider_invoice_id FROM subscription_payments WHERE id = ?").bind(id).first();
   if (!row) return adminJson({ error: "Payment was not found.", code: "NOT_FOUND" }, 404);
   if (row.status === "paid_manual") return adminJson({ ok: true, already_activated: true });
-  if (["paid", "captured", "refunded", "voided"].includes(row.status)) {
+  if (!["initiated", "on_hold"].includes(row.status)) {
     return adminJson({ error: "The recorded payment status cannot be manually activated.", code: "PAYMENT_ALREADY_SETTLED" }, 409);
   }
   const plan = planById(row.plan);
   if (!plan?.price_sar) return adminJson({ error: "Payment plan is no longer available.", code: "BAD_PLAN" }, 409);
-  const end = new Date(Date.now() + (plan.billing === "yearly" ? 365 : 30) * 86400000).toISOString().slice(0, 10);
+  const current = await readSubscriptionRecord(access.db, row.user_id);
+  const snapshot = subscriptionSnapshot(current, row.user_id);
+  const end = nextPeriodEnd(plan.billing, current);
   try {
     await guardedUserBatch(access.db, row.user_id,
-      "EXISTS (SELECT 1 FROM subscription_payments WHERE id = ? AND status = ?)", [row.id, row.status], [
+      `(${snapshot.sql}) AND EXISTS (SELECT 1 FROM subscription_payments WHERE id=? AND status=?)
+       AND NOT EXISTS (SELECT 1 FROM payment_refunds WHERE provider_invoice_id=? AND refunded_halalas>0)
+       AND NOT EXISTS (SELECT 1 FROM payment_activations WHERE invoice_id=?)`,
+      [...snapshot.params, row.id, row.status, row.provider_invoice_id, row.provider_invoice_id], [
       access.db.prepare(`
         INSERT INTO subscriptions(user_id, plan, status, ai_monthly_limit_usd, current_period_end, updated_at)
         VALUES (?, ?, 'active', ?, ?, CURRENT_TIMESTAMP)
         ON CONFLICT(user_id) DO UPDATE SET plan=excluded.plan, status='active',
-          ai_monthly_limit_usd=excluded.ai_monthly_limit_usd,
-          current_period_end=CASE WHEN subscriptions.plan=excluded.plan AND subscriptions.status='active'
-            AND subscriptions.current_period_end > excluded.current_period_end
-            THEN subscriptions.current_period_end ELSE excluded.current_period_end END,
-          updated_at=CURRENT_TIMESTAMP
+          ai_monthly_limit_usd=excluded.ai_monthly_limit_usd, current_period_end=excluded.current_period_end, updated_at=CURRENT_TIMESTAMP
       `).bind(row.user_id, plan.id, plan.ai_monthly_limit_usd, end),
       access.db.prepare("UPDATE subscription_payments SET status = 'paid_manual', updated_at = CURRENT_TIMESTAMP WHERE id = ?").bind(row.id),
       auditStatement(context, access, "payment.manual_activate", "payment", id, { invoice_id: row.provider_invoice_id, plan: row.plan }),
@@ -253,7 +261,7 @@ async function updateSubscriber(context, id) {
         status=COALESCE(?, subscriptions.status), ai_monthly_limit_usd=COALESCE(?, subscriptions.ai_monthly_limit_usd),
         current_period_end=CASE WHEN ? = 1 THEN excluded.current_period_end ELSE subscriptions.current_period_end END,
         updated_at=CURRENT_TIMESTAMP
-    `).bind(target, body.plan ?? "free", body.status ?? "trial", limit ?? 5, end,
+    `).bind(target, body.plan ?? "free", body.status ?? "trial", limit ?? planById(body.plan)?.ai_monthly_limit_usd ?? FREE_MONTHLY_AI_BUDGET_USD, end,
       body.plan ?? null, body.status ?? null, limit ?? null, Number(hasEnd)),
     auditStatement(context, access, "subscriber.update", "subscription", target, fields),
   ]);
@@ -438,19 +446,11 @@ async function usageSummary(db, since = "") {
 }
 
 async function paymentSummary(db) {
-  const row = await db.prepare(`
-    SELECT COUNT(*) AS total, COALESCE(SUM(amount_sar), 0) AS gross_sar,
-      SUM(CASE WHEN status IN ('paid','paid_manual','captured') THEN 1 ELSE 0 END) AS paid,
-      SUM(CASE WHEN status IN ('initiated','pending','on_hold') THEN 1 ELSE 0 END) AS pending,
-      SUM(CASE WHEN status IN ('failed','expired','canceled','voided') THEN 1 ELSE 0 END) AS failed
-    FROM subscription_payments
-  `).first();
+  const totals = await paymentTotals(db);
   return {
-    total: Number(row?.total || 0),
-    gross_sar: Number(row?.gross_sar || 0),
-    paid: Number(row?.paid || 0),
-    pending: Number(row?.pending || 0),
-    failed: Number(row?.failed || 0),
+    ...totals, total: totals.records, gross_sar: totals.gross_halalas / 100,
+    refunded_sar: totals.refunded_halalas / 100, voided_charge_sar: totals.voided_charge_halalas / 100,
+    net_sar: totals.verified_halalas / 100, manual_sar: totals.manual_halalas / 100,
   };
 }
 

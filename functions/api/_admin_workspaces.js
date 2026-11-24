@@ -1,6 +1,6 @@
 import { adminJson, auditStatement, requireAdmin } from "./_admin.js";
 import { ensureRecruitmentSchema } from "./_recruitment.js";
-import { ensureSubscriptionSchema, PAYMENT_ACTIVATIONS_SCHEMA } from "./_subscriptions.js";
+import { ensureSubscriptionSchema } from "./_subscriptions.js";
 import { AuthError, USERS_SCHEMA } from "./auth/_auth.js";
 
 const SUPPORT = ["open", "in_progress", "resolved"];
@@ -149,10 +149,58 @@ async function marketing(context, access, method, id) {
   return notFound();
 }
 
+// Derive the same collection amounts for the register, its CSV and both dashboards.
+// Each verified invoice contributes once, even when historical order rows share an ID.
+const paymentRegister = `SELECT classified.*,
+    CASE WHEN collection IN ('paid', 'partially_refunded', 'refunded') OR (collection = 'voided' AND verified_at IS NOT NULL) THEN amount_halalas END AS gross_halalas,
+    CASE WHEN collection IN ('partially_refunded', 'refunded') THEN reversal_halalas WHEN collection = 'paid' THEN 0 END AS refunded_halalas,
+    CASE WHEN collection = 'voided' AND verified_at IS NOT NULL THEN amount_halalas END AS voided_charge_halalas,
+    CASE WHEN collection = 'paid' THEN amount_halalas
+      WHEN collection IN ('partially_refunded', 'refunded') THEN amount_halalas - reversal_halalas
+      WHEN collection = 'voided' THEN 0 END AS net_halalas
+  FROM (
+    SELECT p.id, p.created_at, p.provider, p.provider_invoice_id, p.provider_payment_id, p.plan,
+      p.amount_halalas, p.currency, p.status, a.created_at AS verified_at, f.refunded_halalas AS reversal_halalas,
+      CASE
+        WHEN p.provider_invoice_id <> '' AND EXISTS (SELECT 1 FROM subscription_payments old
+          WHERE old.provider = p.provider AND old.provider_invoice_id = p.provider_invoice_id AND old.id < p.id) THEN 'duplicate'
+        WHEN p.status = 'paid_manual' THEN 'manual'
+        WHEN p.status IN ('initiated', 'pending', 'on_hold', 'creating', 'authorized') THEN 'pending'
+        WHEN p.status IN ('failed', 'expired', 'canceled', 'cancelled') THEN 'failed'
+        WHEN p.provider = 'moyasar' AND p.currency = 'SAR' AND p.amount_halalas > 0 AND p.provider_invoice_id <> '' THEN
+          CASE WHEN p.status IN ('paid', 'captured') AND a.invoice_id IS NOT NULL AND f.provider_invoice_id IS NULL THEN 'paid'
+            WHEN p.status = 'partially_refunded' AND f.refunded_halalas > 0 AND f.refunded_halalas < p.amount_halalas THEN 'partially_refunded'
+            WHEN p.status IN ('refunded', 'voided') AND f.refunded_halalas = p.amount_halalas THEN p.status
+            ELSE 'unreconciled' END
+        ELSE 'unreconciled' END AS collection
+    FROM subscription_payments p
+    LEFT JOIN payment_activations a ON a.invoice_id = p.provider_invoice_id AND a.user_id = p.user_id AND a.plan = p.plan
+    LEFT JOIN payment_refunds f ON f.provider_invoice_id = p.provider_invoice_id
+  ) classified`;
+
+export async function paymentTotals(db, since = "") {
+  const totals = await db.prepare(`SELECT COUNT(*) AS records,
+    COALESCE(SUM(gross_halalas), 0) AS gross_halalas,
+    COALESCE(SUM(refunded_halalas), 0) AS refunded_halalas,
+    COALESCE(SUM(voided_charge_halalas), 0) AS voided_charge_halalas,
+    COALESCE(SUM(net_halalas), 0) AS verified_halalas,
+    COALESCE(SUM(CASE WHEN collection = 'manual' AND currency = 'SAR' THEN amount_halalas ELSE 0 END), 0) AS manual_halalas,
+    COUNT(CASE WHEN collection = 'paid' THEN 1 END) AS paid,
+    COUNT(CASE WHEN collection = 'manual' THEN 1 END) AS manual,
+    COUNT(CASE WHEN collection = 'pending' THEN 1 END) AS pending,
+    COUNT(CASE WHEN collection = 'failed' THEN 1 END) AS failed,
+    COUNT(CASE WHEN collection = 'partially_refunded' THEN 1 END) AS partially_refunded,
+    COUNT(CASE WHEN collection = 'refunded' THEN 1 END) AS refunded,
+    COUNT(CASE WHEN collection = 'voided' THEN 1 END) AS voided,
+    COUNT(CASE WHEN collection = 'unreconciled' THEN 1 END) AS unreconciled,
+    COUNT(CASE WHEN collection = 'duplicate' THEN 1 END) AS duplicates
+    FROM (${paymentRegister}) reg WHERE created_at >= ?`).bind(since).first();
+  return Object.fromEntries(Object.entries(totals).map(([key, value]) => [key, Number(value)]));
+}
+
 async function accounting(context, access, method, id) {
   const { db } = access;
   await ensureSubscriptionSchema(db);
-  await db.prepare(PAYMENT_ACTIVATIONS_SCHEMA).run();
   await db.prepare(reviewSchema).run();
 
   if (method === "GET" && (!id || id === "export")) {
@@ -161,24 +209,19 @@ async function accounting(context, access, method, id) {
     if (![30, 90].includes(days)) throw invalid("Select a 30-day or 90-day window.");
     const since = windowStart(days);
     const exporting = id === "export";
-    const { results } = await db.prepare(`SELECT p.id, p.created_at, p.provider, p.provider_invoice_id, p.provider_payment_id,
-      p.plan, p.amount_halalas, p.currency, p.status, a.created_at AS verified_at,
-      CASE WHEN r.status_at_review = p.status AND r.amount_at_review = p.amount_halalas THEN r.reviewed_at END AS reviewed_at,
-      CASE WHEN r.status_at_review = p.status AND r.amount_at_review = p.amount_halalas THEN r.reference END AS review_reference
-      FROM subscription_payments p
-      LEFT JOIN payment_activations a ON a.invoice_id = p.provider_invoice_id AND a.user_id = p.user_id AND p.status = 'paid'
-      LEFT JOIN admin_payment_reviews r ON r.payment_id = p.id
-      WHERE p.created_at >= ? ORDER BY p.created_at DESC, p.id DESC LIMIT ?`).bind(since, (exporting ? 5000 : ACCOUNTING_LIMIT) + 1).all();
+    const { results } = await db.prepare(`SELECT reg.id, reg.created_at, reg.provider, reg.provider_invoice_id, reg.provider_payment_id,
+      reg.plan, reg.amount_halalas, reg.currency, reg.status, reg.collection, reg.verified_at,
+      reg.gross_halalas, reg.refunded_halalas, reg.voided_charge_halalas, reg.net_halalas,
+      r.reviewed_at, r.reference AS review_reference
+      FROM (${paymentRegister}) reg
+      LEFT JOIN admin_payment_reviews r ON r.payment_id = reg.id AND r.status_at_review = reg.status
+        AND reg.collection NOT IN ('unreconciled', 'duplicate') AND r.amount_at_review = COALESCE(reg.net_halalas, reg.amount_halalas)
+      WHERE reg.created_at >= ? ORDER BY reg.created_at DESC, reg.id DESC LIMIT ?`).bind(since, (exporting ? 5000 : ACCOUNTING_LIMIT) + 1).all();
     if (exporting) {
       if (results.length > 5000) throw invalid("This window exceeds the export limit. Select a shorter period.", 409, "EXPORT_LIMIT");
       return csvResponse(results);
     }
-    const totals = await db.prepare(`SELECT COUNT(*) AS records,
-      COALESCE(SUM(CASE WHEN p.currency = 'SAR' AND p.status = 'paid' AND a.invoice_id IS NOT NULL THEN p.amount_halalas ELSE 0 END), 0) AS verified_halalas,
-      COALESCE(SUM(CASE WHEN p.currency = 'SAR' AND p.status = 'paid_manual' THEN p.amount_halalas ELSE 0 END), 0) AS manual_halalas
-      FROM subscription_payments p LEFT JOIN payment_activations a
-        ON a.invoice_id = p.provider_invoice_id AND a.user_id = p.user_id
-      WHERE p.created_at >= ?`).bind(since).first();
+    const totals = await paymentTotals(db, since);
     return adminJson({ since, rows: results.slice(0, ACCOUNTING_LIMIT), truncated: results.length > ACCOUNTING_LIMIT, totals });
   }
   if (method === "POST" && /^\d{1,18}$/.test(id || "")) {
@@ -186,19 +229,22 @@ async function accounting(context, access, method, id) {
     const status = field(body.status, 2, 30, "Payment status");
     const amount = Number(body.amount_halalas);
     if (!Number.isSafeInteger(amount) || amount < 0) throw invalid("Invalid payment amount.");
+    const reviewAmount = body.review_amount_halalas === undefined ? amount : Number(body.review_amount_halalas);
+    if (!Number.isSafeInteger(reviewAmount) || reviewAmount < 0) throw invalid("Invalid review amount.");
     const reference = field(body.reference, 3, 120, "Statement reference");
     const operation = crypto.randomUUID();
     await change(db, db.prepare(`INSERT INTO admin_payment_reviews
       (payment_id, status_at_review, amount_at_review, reference, reviewed_by, operation_id)
-      SELECT id, status, amount_halalas, ?, ?, ? FROM subscription_payments
-        WHERE id = ? AND status = ? AND amount_halalas = ?
+      SELECT id, status, COALESCE(net_halalas, amount_halalas), ?, ?, ? FROM (${paymentRegister}) reg
+        WHERE id = ? AND status = ? AND amount_halalas = ? AND COALESCE(net_halalas, amount_halalas) = ?
+          AND collection NOT IN ('unreconciled', 'duplicate')
       ON CONFLICT(payment_id) DO UPDATE SET status_at_review = excluded.status_at_review,
         amount_at_review = excluded.amount_at_review, reference = excluded.reference,
         reviewed_by = excluded.reviewed_by, operation_id = excluded.operation_id, reviewed_at = CURRENT_TIMESTAMP
       WHERE admin_payment_reviews.status_at_review <> excluded.status_at_review
         OR admin_payment_reviews.amount_at_review <> excluded.amount_at_review`)
-      .bind(reference, access.admin.email, operation, id, status, amount),
-    auditStatement(context, access, "accounting.review", "subscription_payment", id, { status, amount_halalas: amount },
+      .bind(reference, access.admin.email, operation, id, status, amount, reviewAmount),
+    auditStatement(context, access, "accounting.review", "subscription_payment", id, { status, amount_halalas: amount, reviewed_amount_halalas: reviewAmount },
       { table: "admin_payment_reviews", key: "payment_id", id, operation }), "The payment changed or was already reviewed. Refresh before trying again.");
     return adminJson({ ok: true });
   }
@@ -227,7 +273,7 @@ function windowStart(days) {
 
 function csvResponse(rows) {
   const columns = ["id", "created_at", "provider", "provider_invoice_id", "provider_payment_id", "plan", "amount_halalas",
-    "currency", "status", "verified_at", "reviewed_at", "review_reference"];
+    "currency", "status", "collection", "gross_halalas", "refunded_halalas", "voided_charge_halalas", "net_halalas", "verified_at", "reviewed_at", "review_reference"];
   const csv = [columns.join(","), ...rows.map((row) => columns.map((key) => csvCell(row[key])).join(","))].join("\r\n");
   return new Response(csv + "\r\n", { headers: {
     "Content-Type": "text/csv; charset=utf-8", "Content-Disposition": 'attachment; filename="jobs-payment-register.csv"', "Cache-Control": "no-store",

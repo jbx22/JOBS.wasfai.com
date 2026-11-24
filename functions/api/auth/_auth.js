@@ -1,3 +1,4 @@
+export { safeReturnPath } from "../../../public/return-path.js";
 import { getJobDb } from "../_db.js";
 
 const COOKIE_NAME = "jobs_session";
@@ -166,16 +167,6 @@ export async function readActiveSession(request, env = {}) {
     session: { ...session, email: account.email, name: account.display_name, picture: account.picture_url, account_status: account.account_status },
     account,
   };
-}
-
-export function safeReturnPath(value) {
-  if (typeof value !== "string" || !value.startsWith("/") || value.startsWith("//") || value.length > 160) return "";
-  if (/[\\\u0000-\u0020\u007f]/.test(value)) return "";
-  let decoded;
-  try { decoded = decodeURIComponent(value); } catch { return ""; }
-  if (decoded.startsWith("//") || /[\\\u0000-\u0020\u007f]/.test(decoded)) return "";
-  const resolved = new URL(value, "https://jobs.wasfai.com");
-  return resolved.origin === "https://jobs.wasfai.com" ? value : "";
 }
 
 export function pkceCookie(value) {

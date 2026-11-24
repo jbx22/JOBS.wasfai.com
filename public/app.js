@@ -1,6 +1,7 @@
 /* JOBS.wasfai.com — Arabic-first RTL mobile PWA */
 "use strict";
 
+import { safeReturnPath } from "./return-path.js";
 import { inferResumeSignals, readableResumeText } from "./resume-signals.js";
 import { assessResumeText } from "./resume-text-quality.js";
 import { extractResumeFileText, resumeExtractionErrorMessage } from "./resume-extraction.js";
@@ -1219,7 +1220,7 @@ function renderTopbar() {
           <a href="/applications${en ? "?lang=en" : ""}">${iconDoc()} <span>${en ? "My applications" : "طلبات التوظيف"}</span></a>
           <a href="/vacancies${en ? "?lang=en" : ""}">${iconList()} <span>${en ? "Public vacancies" : "الوظائف العامة"}</span></a>
           <a href="/employers">${iconUser()} <span>${en ? "Employers" : "أصحاب العمل"}</span></a>
-          <a href="/pricing/">${iconSpark()} <span>${en ? "Subscriptions" : "الاشتراكات"}</span></a>
+          <a href="/pricing/?lang=${en ? "en" : "ar"}">${iconSpark()} <span>${en ? "Plans and payments" : "الباقات والمدفوعات"}</span></a>
         </div>
       </div>
     </div>
@@ -1983,7 +1984,13 @@ function sourceCardHtml(s) {
 
 /* ---------------- Account ---------------- */
 function renderLogin() {
-  if (state.session?.authenticated) return navigate("/account");
+  if (state.session?.authenticated) {
+    const next = safeReturnPath(new URLSearchParams(location.search).get("next"));
+    if (next && !/^\/(?:api|login)(?:[/?#]|$)/i.test(new URL(next, location.origin).pathname)) {
+      return location.replace(next);
+    }
+    return navigate("/account");
+  }
   const en = state.locale === "en";
   const retry = new URLSearchParams(location.search).get("oauth_retry") === "1";
   shell(
@@ -2131,7 +2138,8 @@ function renderAuthPanel() {
     ${state.session?.authenticated ? `<p dir="auto">${esc([user.name, user.email].filter(Boolean).join(" · "))}</p>
       <button class="btn outline" data-auth-logout>${t("تسجيل الخروج", "Sign out")}</button>`
       : `<a class="btn outline" href="/login" data-nav="/login">${t("تسجيل الدخول", "Sign in")}</a>`}
-    <div class="account-links"><a href="/terms" data-nav="/terms">${t("الشروط", "Terms")}</a>
+    <div class="account-links"><a href="/pricing/?lang=${state.locale === "en" ? "en" : "ar"}">${t("الاشتراك وسجل المدفوعات", "Subscription and payment history")}</a>
+      <a href="/terms" data-nav="/terms">${t("الشروط", "Terms")}</a>
       <a href="/privacy" data-nav="/privacy">${t("الخصوصية", "Privacy")}</a></div>
   </div>`;
 }
