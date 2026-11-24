@@ -1,8 +1,11 @@
-const CACHE_NAME = "jobs-wasfai-v77";
+const CACHE_NAME = "jobs-wasfai-v78";
 const APP_SHELL = [
   "/",
   "/app",
   "/styles.css",
+  "/job-flow.css",
+  "/account-flow.css",
+  "/home-flow.css",
   "/app.js",
   "/resume-signals.js",
   "/resume-text-quality.js",

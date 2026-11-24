@@ -9,6 +9,7 @@ import { getJobDb } from "../functions/api/_db.js";
 import { onRequestPost as uploadResume, onRequestGet as latestResume } from "../functions/api/resumes/index.js";
 import { FILE_TABLE_SQL } from "../functions/api/resumes/_files.js";
 import { listPublicJobs, getPublicJob, jobPosting, plainDescription, matchPublicJobs } from "../functions/api/_public_jobs.js";
+import { onRequestGet as catalogue } from "../functions/vacancies/index.js";
 import { onRequestGet as detail } from "../functions/vacancies/[id].js";
 import { onRequestGet as sitemap } from "../functions/sitemap.xml.js";
 import { onRequestGet as sitemapPage } from "../functions/sitemaps/[page].js";
@@ -214,4 +215,33 @@ test("replacing a CV preserves an active application's attachment and returns th
   assert.deepEqual(removed, []);
   const current = await latestResume({ env: uploadEnv, request: new Request("https://jobs.wasfai.com/api/resumes", { headers: { Cookie: cookie } }) });
   assert.equal((await current.json()).file.id, fresh.id);
+});
+
+
+test("public catalogue preserves language and search filters through pagination, vacancy navigation and language switches", async (t) => {
+  const { db } = await setup(t);
+  const now = new Date().toISOString();
+  const insert = db.prepare("INSERT INTO jobs (id, source_id, title, employer, location, description, dedupe_key, verification_status, last_verified_at, posted_at) VALUES (?, 'wazzuf', ?, 'Example', 'Riyadh', 'Lead engineering projects', ?, 'live', ?, ?)");
+  for (let i = 0; i < 41; i++) insert.run("job-" + i, "Engineer " + i, "vacancy-" + i, now, now);
+  const request = path => new Request("https://jobs.wasfai.com" + path);
+  const list = async (query = "") => (await catalogue({ env, request: request("/vacancies" + query) })).text();
+  const en = await list("?lang=en&q=Engineer&city=Riyadh&profession=Engineer");
+  assert.match(en, /<html lang="en" dir="ltr">/);
+  assert.match(en, /name="lang" value="en"/);
+  assert.match(en, /<details class="catalogue-more" open>/);
+  assert.match(en, /<button class="btn primary">Search<\/button>/);
+  assert.match(en, /href="\/vacancies\?lang=en&amp;q=Engineer&amp;city=Riyadh&amp;profession=Engineer&amp;page=2">Next/);
+  assert.match(en, /href="\/vacancies\?q=Engineer&amp;city=Riyadh&amp;profession=Engineer" hreflang="ar"/);
+  assert.match(en, /href="\/vacancies\?lang=en&amp;q=Engineer&amp;city=Riyadh&amp;profession=Engineer&amp;sector=government"/);
+  const target = en.match(/href="(\/vacancies\/i-job-[^"]+)"/)[1].replaceAll("&amp;", "&");
+  const selected = await detail({ env, params: { id: target.split("?")[0].split("/").pop() }, request: request(target) });
+  assert.match(await selected.text(), /href="\/vacancies\?lang=en&amp;q=Engineer&amp;city=Riyadh&amp;profession=Engineer">Browse jobs/);
+  const last = await list("?lang=en&q=Engineer&city=Riyadh&profession=Engineer&page=2");
+  assert.match(last, /href="\/vacancies\?lang=en&amp;q=Engineer&amp;city=Riyadh&amp;profession=Engineer">Previous/);
+  assert.doesNotMatch(last, />Next<\/a>/);
+  const arabic = await list();
+  assert.match(arabic, /<html lang="ar" dir="rtl">/);
+  assert.match(arabic, /name="robots" content="index,follow"/);
+  assert.match(arabic, /rel="canonical" href="https:\/\/jobs.wasfai.com\/vacancies"/);
+  assert.doesNotMatch(arabic, /<details class="catalogue-more" open>/);
 });

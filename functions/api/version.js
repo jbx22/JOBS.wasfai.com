@@ -12,7 +12,7 @@
  * Non-sensitive by design: version strings only — no paths, tokens, provider
  * names or environment internals. Nothing else about the app is disclosed.
  */
-export const JOBS_RELEASE = "jobs77";
+export const JOBS_RELEASE = "jobs78";
 
 export async function onRequest(context) {
   const method = context.request.method.toUpperCase();
